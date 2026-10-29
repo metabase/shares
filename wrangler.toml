@@ -59,7 +59,7 @@ routes = [
 [[env.metabase.d1_databases]]
 binding = "DB"
 database_name = "shares"
-database_id = "TBD"
+database_id = "9e247c0a-531b-4401-bcb0-2ac6293470e2"
 migrations_dir = "migrations"
 
 [[env.metabase.r2_buckets]]
