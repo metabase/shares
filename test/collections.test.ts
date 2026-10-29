@@ -162,7 +162,7 @@ describe('collections and metadata', () => {
     const r = await api('GET', '/_api/nope')
     expect(r.status).toBe(404)
     expect(await r.json()).toEqual({ error: 'not found' })
-    expect((await api('GET', '/_api/shares', { token: 'bad' })).status).toBe(403)
+    expect((await api('GET', '/_api/shares', { token: 'bad' })).status).toBe(401)
   })
 
   it('still publishes without attributes through the legacy flow', async () => {

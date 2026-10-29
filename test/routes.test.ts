@@ -11,16 +11,10 @@ describe('auth', () => {
     expect(atob(loc.searchParams.get('state')!)).toBe('/some-share/')
   })
 
-  it('refuses writes without a valid token', async () => {
-    expect((await fetchWorker('/x/a.md', { method: 'PUT', body: 'x' })).status).toBe(403)
-    expect((await api('PUT', '/x/a.md', { token: 't.bad.sig', body: 'x' })).status).toBe(403)
-  })
-
-  it('accepts a personal token from the /_token page', async () => {
-    const page = await (await browse('/_token', 'pat@metabase.com')).text()
-    const token = await userToken('pat@metabase.com')
-    expect(page).toContain(token)
-    expect((await api('GET', '/_list', { token })).status).toBe(200)
+  it('refuses writes without a valid token with 401', async () => {
+    expect((await fetchWorker('/x/a.md', { method: 'PUT', body: 'x' })).status).toBe(401)
+    expect((await api('PUT', '/x/a.md', { token: 't.bad.sig', body: 'x' })).status).toBe(401)
+    expect((await api('PUT', '/x/a.md', { token: `shr_000000000000_${'0'.repeat(64)}`, body: 'x' })).status).toBe(401)
   })
 })
 

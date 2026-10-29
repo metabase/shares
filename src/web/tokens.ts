@@ -20,14 +20,14 @@ const origins = (url: URL, env: Env) => ({
   content: contentBase(url, env) || url.origin,
 })
 
-// POST /_device and POST /_device/token. null: not a device endpoint.
+// POST /_device/code and POST /_device/token. null: not a device endpoint.
 export async function deviceApi(req: Request, url: URL, env: Env): Promise<Response | null> {
-  if (req.method !== 'POST' || (url.pathname !== '/_device' && url.pathname !== '/_device/token')) return null
+  if (req.method !== 'POST' || (url.pathname !== '/_device/code' && url.pathname !== '/_device/token')) return null
   if (env.PUBLIC || !env.DB) return new Response('not found\n', { status: 404 })
   let body: { name?: unknown; device_code?: unknown }
   try { body = await req.json() } catch { return new Response('bad json\n', { status: 400 }) }
 
-  if (url.pathname === '/_device') {
+  if (url.pathname === '/_device/code') {
     const { deviceCode, userCode } = await startDevice(env, typeof body.name === 'string' ? body.name : '')
     const { app, content } = origins(url, env)
     const verify = `${app}${approvePath(url, env)}`

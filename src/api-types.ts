@@ -1,7 +1,7 @@
 // HTTP API of the Worker, for clients (the TS CLI, SHR-7). No imports: the
 // CLI imports this file without the Worker's runtime types.
 //
-// Every endpoint but /_cli, /_skill and /_device* takes
+// Every endpoint but /_cli, /_skill and /_device/* takes
 // `Authorization: Bearer <token>`. A missing, bad, expired or revoked token
 // gives 401 "unauthorized". Bodies are text unless noted. Errors are
 // text with a trailing newline: 400 (reserved path, bad slug, empty
@@ -54,7 +54,7 @@ export interface ApiEndpoints {
   // `share login`, no bearer token (RFC 8628 device flow). Open
   // verification_uri_complete, then poll /_device/token every `interval`
   // seconds until it returns the token.
-  'POST /_device': { body: { name?: string }; response: DeviceStartResponse }
+  'POST /_device/code': { body: { name?: string }; response: DeviceStartResponse }
   // 400 with error authorization_pending (poll again), access_denied or
   // expired_token (start again); 200 with the token
   'POST /_device/token': { body: { device_code: string }; response: DeviceTokenResponse }
