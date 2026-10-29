@@ -7,9 +7,10 @@ import type { DeviceStartResponse, DeviceTokenResponse, TokenInfo } from '../api
 import { ago, esc, page } from '../render/page'
 import { appBase, contentBase, hostKind } from '../origins'
 import {
-  DEVICE_SECONDS, POLL_SECONDS, createToken, decideDevice, deviceByUserCode, formatUserCode, listTokens,
-  pollDevice, revokeToken, startDevice, type TokenRow,
+  DEVICE_SECONDS, POLL_SECONDS, createServiceToken, createToken, decideDevice, deviceByUserCode, formatUserCode,
+  listServiceTokens, listTokens, pollDevice, revokeServiceToken, revokeToken, startDevice, type TokenRow,
 } from '../tokens'
+import { serviceSpec } from '../api/tokens'
 
 // The approve page: /cli on the app host. On the combined host /cli is a
 // share slug, so the page is at /_device there.
@@ -89,8 +90,34 @@ function status(t: TokenRow) {
   return `expires ${new Date(t.expires_at!).toISOString().slice(0, 10)}`
 }
 
+// The admin's service tokens section of /_token (SHR-13 tokens, SHR-15 UI):
+// list, revoke, and a create form with the fields of POST /_api/tokens.
+async function serviceSection(env: Env) {
+  const rows = (await listServiceTokens(env)).map((t) => {
+    const live = !t.revoked_at && !(t.expires_at && t.expires_at <= Date.now())
+    const scopes = (JSON.parse(t.scopes) as string[]).map((s) => `<code>${esc(s)}</code>`).join(' ')
+    return `<tr${live ? '' : ' class="off"'}><td class="n">agent:${esc(t.name)} <small>${esc(t.id)}</small><br>${scopes}${
+      t.on_behalf_of ? `<br><small>for ${esc(t.on_behalf_of)}</small>` : ''}</td>
+<td title="${new Date(t.created_at).toISOString()}">${ago(t.created_at)}</td>
+<td>${t.last_used_at ? `used ${ago(t.last_used_at)}` : 'never used'}</td><td>${status(t)}</td>
+<td>${live ? `<form class="in" method="post"><input type="hidden" name="action" value="service-revoke"><input type="hidden" name="id" value="${esc(t.id)}"><button>revoke</button></form>` : ''}</td></tr>`
+  })
+  return `<div class="step">
+<h2>service tokens <small>(admin)</small></h2>
+<p>for agents and CI. Scopes: <code>read:&lt;collection&gt;</code> or <code>write:&lt;collection&gt;</code>, a trailing <code>*</code> matches any rest. Shares the token makes belong to the "on behalf of" person, else to the agent.</p>
+${rows.length ? `<table class="tl"><tr><th>agent and scopes</th><th>created</th><th>last use</th><th>status</th><th></th></tr>${rows.join('')}</table>` : '<p>no service tokens yet</p>'}
+<form method="post" style="margin:.8rem 0 0"><input type="hidden" name="action" value="service-create">
+<input name="name" placeholder="agent name" maxlength="64" required>
+<input name="scopes" placeholder="write:metareview/*" required size="24">
+<input name="on_behalf_of" placeholder="on behalf of (email, optional)" size="24">
+<input name="expires_days" placeholder="days (365)" size="8">
+<button>create service token</button></form>
+</div>`
+}
+
 // GET /_token; `created`: a token that was just created, shown once
-export async function tokenPage(url: URL, env: Env, email: string, created?: { token: string; name: string }) {
+export async function tokenPage(url: URL, env: Env, email: string,
+  created?: { token: string; name: string; service?: boolean }, error?: string) {
   const { app, content } = origins(url, env)
   const install = `curl -fsSL ${app}/${hostKind(url, env) === 'app' ? 'install.sh' : '_install.sh'} | sh && share login`
   const skill = `mkdir -p ~/.claude/skills/mb-shares && curl -fsS ${app}/_skill -o ~/.claude/skills/mb-shares/SKILL.md`
@@ -101,7 +128,12 @@ export async function tokenPage(url: URL, env: Env, email: string, created?: { t
 <td>${t.last_used_at ? `used ${ago(t.last_used_at)}` : 'never used'}</td><td>${status(t)}</td>
 <td>${live ? `<form class="in" method="post"><input type="hidden" name="action" value="revoke"><input type="hidden" name="id" value="${esc(t.id)}"><button>revoke</button></form>` : ''}</td></tr>`
   })
-  const shown = created
+  const shown = created?.service
+    ? `<div class="step"><h2>new service token <code>agent:${esc(created.name)}</code></h2>
+<p>shown once. Give it to the agent as its bearer token:</p>
+<pre><code>${esc(created.token)}</code></pre>
+</div>`
+    : created
     ? `<div class="step"><h2>new token <code>${esc(created.name)}</code></h2>
 <p>shown once. This line saves it as the <code>share</code> config:</p>
 <pre><code>${esc(`mkdir -p ~/.config/shares && (umask 077; printf 'BASE_URL=%s\\nCONTENT_URL=%s\\nUPLOAD_TOKEN=%s\\n' '${app}' '${content}' '${created.token}' > ~/.config/shares/config)`)}</code></pre>
@@ -111,7 +143,7 @@ export async function tokenPage(url: URL, env: Env, email: string, created?: { t
 <div class="tk">
 <h1>cli setup</h1>
 <p class="sub">signed in as <code>${esc(email)}</code></p>
-${shown}<div class="step">
+${error ? `<div class="step"><h2>not created</h2><p>${esc(error)}</p></div>` : ''}${shown}<div class="step">
 <h2><span class="k">1</span>install the <code>share</code> cli and log in</h2>
 <p>installs to <code>~/.local/bin</code> (macOS, Linux). <code>share login</code> opens this site to approve a new token.</p>
 <pre><code>${esc(install)}</code></pre>
@@ -128,6 +160,7 @@ ${rows.length ? `<table class="tl"><tr><th>name</th><th>created</th><th>last use
 <form method="post" style="margin:.8rem 0 0"><input type="hidden" name="action" value="create">
 <input name="name" placeholder="token name" maxlength="100" required> <button>create token</button></form>
 </div>
+${email === env.ADMIN_EMAIL ? await serviceSection(env) : ''}
 <p class="fin">then publish anything: <code>share thing.md</code> prints a URL. <code>share -h</code> for the rest</p>
 </div>`, { poll: false })
 }
@@ -173,6 +206,28 @@ export async function formPost(req: Request, url: URL, env: Env, email: string):
     if (action === 'revoke') {
       await revokeToken(env, email, String(form.get('id') || ''))
       return new Response(null, { status: 303, headers: { location: '/_token' } })
+    }
+    if (action === 'service-create' || action === 'service-revoke') {
+      if (email !== env.ADMIN_EMAIL) return new Response('forbidden\n', { status: 403 })
+      if (action === 'service-revoke') {
+        await revokeServiceToken(env, email, String(form.get('id') || ''))
+        return new Response(null, { status: 303, headers: { location: '/_token' } })
+      }
+      const field = (k: string) => String(form.get(k) || '').trim()
+      const days = field('expires_days')
+      const spec = serviceSpec({
+        name: field('name'),
+        scopes: field('scopes').split(/[\s,]+/).filter(Boolean),
+        on_behalf_of: field('on_behalf_of').toLowerCase() || null,
+        expires_days: days ? Number(days) : undefined,
+      }, env)
+      if (typeof spec === 'string') {
+        const r = await tokenPage(url, env, email, undefined, spec)
+        return new Response(r.body, { status: 400, headers: r.headers })
+      }
+      const { token } = await createServiceToken(env, email,
+        { name: spec.name, scopes: spec.scopes, on_behalf_of: spec.on_behalf_of, days: spec.expires_days })
+      return tokenPage(url, env, email, { name: spec.name, token, service: true })
     }
     return new Response('bad action\n', { status: 400 })
   }

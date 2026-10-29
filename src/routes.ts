@@ -11,6 +11,7 @@ import SKILL_MD from '../skill/SKILL.md'
 import INSTALL_SH from '../cli/install.sh'
 import { approvePath, deviceApi, formPost } from './web/tokens'
 import { serve } from './web/serve'
+import { managePost } from './web/manage'
 import { notFound } from './render/page'
 import { storeFor, type ShareStore } from './store'
 import { appBase, contentBase } from './origins'
@@ -55,15 +56,19 @@ async function open(req: Request, url: URL, env: Env): Promise<Response | null> 
   return deviceApi(req, url, env)
 }
 
-// HTML form posts of a signed-in user: /_token (create, revoke) and the
-// approve page of `share login`. A browser sends Origin on every POST; it
-// must be this origin, so a page on another origin cannot submit them.
+// HTML form posts of a signed-in user: /_token (create, revoke), the
+// approve page of `share login` and the share page /_s/<slug>. A browser
+// sends Origin on every POST; it must be this origin, so a page on another
+// origin cannot submit them.
 const isFormPost = (req: Request, url: URL, env: Env) => req.method === 'POST' && !env.PUBLIC
-  && (url.pathname === '/_token' || url.pathname === approvePath(url, env))
+  && (url.pathname === '/_token' || url.pathname === approvePath(url, env) || url.pathname.startsWith('/_s/'))
 
 async function form(req: Request, url: URL, env: Env, email: string | null) {
   if (req.headers.get('origin') !== url.origin) return forbidden()
   if (!email) return new Response('not signed in; reload the page\n', { status: 401 })
+  // share changes: a form submit only, not a fetch() of a share page on
+  // the combined host
+  if (url.pathname.startsWith('/_s/')) return isNavigation(req) ? managePost(req, url, env, storeFor(env), email) : forbidden()
   return formPost(req, url, env, email)
 }
 
@@ -96,6 +101,7 @@ function recordView(ctx: ExecutionContext, store: ShareStore, key: string, email
 
 const keyOf = (url: URL) => decodeURIComponent(url.pathname.slice(1))
 const isPrivatePage = (key: string) => key === '' || key === '_token' || key === '_stats' || key === '_device'
+  || key === '_collections' || key.startsWith('_s/')
 
 // PUBLIC_SHARING: a share its owner marked public opens without login
 // (SHR-9). Only share paths: private pages and _-prefixed paths never.
