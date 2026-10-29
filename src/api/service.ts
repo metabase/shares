@@ -5,10 +5,12 @@
 // api-types.ts.
 
 import type { Env } from '../env'
-import { isQueryStore, StoreError } from '../store'
+import type { WhoAmI } from '../api-types'
+import { baseSlug, isQueryStore, pinned, StoreError } from '../store'
 import type { CommitFile, QueryStore, ShareAttrs, ShareStore } from '../store'
 import type { ServiceCaller } from '../tokens'
 import { revokeServiceToken } from '../tokens'
+import { badSlug, publishResponse } from './cli'
 
 type Access = 'read' | 'write'
 
@@ -46,11 +48,17 @@ export async function serviceApi(req: Request, url: URL, env: Env, store: ShareS
 async function dispatch(req: Request, url: URL, env: Env, store: ShareStore & QueryStore,
   who: ServiceCaller): Promise<Response> {
   const can = (access: Access, collection: string | null | undefined) => allows(who.scopes, access, collection)
-  // a share is in scope when it exists and its collection matches
-  const shareIn = async (access: Access, slug: string) => can(access, (await store.share(slug))?.collection)
+  // a share is in scope when it exists and its collection matches; a
+  // version read path is in scope when its share is
+  const shareIn = async (access: Access, top: string) => can(access, (await store.share(baseSlug(top)))?.collection)
   const key = decodeURIComponent(url.pathname.slice(1))
   const get = req.method === 'GET'
 
+  if (key === '_api/whoami' && get) {
+    return Response.json({
+      kind: 'service', email: who.email, admin: false, token: who.id, agent: who.agent, scopes: who.scopes,
+    } satisfies WhoAmI)
+  }
   if (key === '_api/tokens/current' && req.method === 'DELETE') {
     await revokeServiceToken(env, who.agent, who.id)
     return Response.json({ revoked: who.id })
@@ -69,7 +77,7 @@ async function dispatch(req: Request, url: URL, env: Env, store: ShareStore & Qu
   // be in write scope
   if (key.startsWith('_publish/') && req.method === 'POST') {
     const top = key.slice('_publish/'.length).replace(/\/$/, '')
-    if (!top || top.startsWith('_') || top.includes('/')) return error(400, 'bad slug')
+    if (badSlug(top)) return error(400, 'bad slug')
     const b = await body<{ files?: CommitFile[]; message?: string } & ShareAttrs>(req)
     if (!Array.isArray(b.files)) return error(400, 'files missing')
     const share = await store.share(top)
@@ -77,7 +85,7 @@ async function dispatch(req: Request, url: URL, env: Env, store: ShareStore & Qu
     if (!can('write', collection) || (share && !can('write', share.collection))) return outOfScope()
     const { title, meta } = b
     const version = await store.commit!(top, b.files, who.agent, b.message, { title, collection, meta }, who.email)
-    return Response.json({ slug: top, version })
+    return Response.json(publishResponse(url, env, top, version))
   }
 
   if (key === '_api/collections' && get) {
@@ -149,7 +157,7 @@ async function dispatch(req: Request, url: URL, env: Env, store: ShareStore & Qu
     return b === null ? new Response('not found', { status: 404 }) : new Response(b)
   }
   // DELETE /<slug>/ removes the whole share
-  if (req.method === 'DELETE' && key === `${top}/`) {
+  if (req.method === 'DELETE' && key === `${top}/` && !pinned(top)) {
     if (!await shareIn('write', top)) return outOfScope()
     return new Response(`deleted ${await store.deleteShare(top)}\n`)
   }

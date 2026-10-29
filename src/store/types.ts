@@ -132,3 +132,16 @@ export interface QueryStore {
 export function isQueryStore(s: ShareStore): s is ShareStore & QueryStore {
   return 'queryShares' in s
 }
+
+// "<slug>@<n>" as the top segment of a read path names version n of a
+// share (SHR-14): /<slug>@3/report.html. Only complete versions are
+// readable. Writes refuse such a slug, so it never names a share of its own.
+const PINNED = /^(.+)@([1-9][0-9]{0,8})$/
+
+export function pinned(top: string): { slug: string; version: number } | null {
+  const m = PINNED.exec(top)
+  return m ? { slug: m[1], version: Number(m[2]) } : null
+}
+
+// the share a top segment reads: "<slug>@<n>" -> "<slug>"
+export const baseSlug = (top: string) => pinned(top)?.slug ?? top

@@ -1,7 +1,7 @@
 // HTTP API of the Worker, for clients (the TS CLI, SHR-7). No imports: the
 // CLI imports this file without the Worker's runtime types.
 //
-// Every endpoint but /_cli, /_skill and /_device/* takes
+// Every endpoint but /_cli, /_skill, /_install.sh and /_device/* takes
 // `Authorization: Bearer <token>`. A missing, bad, expired or revoked token
 // gives 401 "unauthorized". Bodies are text unless noted. Errors are
 // text with a trailing newline: 400 (reserved path, bad slug, empty
@@ -15,6 +15,9 @@ export interface ApiEndpoints {
   'GET /_cli': { response: string }
   // Claude Code skill (SKILL.md)
   'GET /_skill': { response: string }
+  // install script of the TS `share` binary (`curl -fsSL <app>/install.sh | sh`).
+  // /install.sh on the app host, /_install.sh on every host.
+  'GET /_install.sh': { response: string }
   // without prefix: slugs of your shares (admin: all), sorted.
   // with ?prefix=<slug>/ or <slug>/<dir>/: full paths of the files under it.
   'GET /_list': { query: { prefix?: string }; response: Lines<string> }
@@ -40,12 +43,17 @@ export interface ApiEndpoints {
   'POST /_finalize/<slug>': { query: FinalizeQuery; body: Lines<string>; response: 'ok\n' }
   // raw bytes of one file
   'GET /<slug>/<path>': { response: ArrayBuffer }
+  // the same file in version <n> (complete versions only). Browsers open
+  // /<slug>@<n>/ on the content host too. Writes to <slug>@<n> give 400.
+  'GET /<slug>@<n>/<path>': { response: ArrayBuffer }
   // who viewed the share (owner or admin)
   'GET /<slug>/_views': { response: Lines<ViewLine> }
   // remove the share and all its files; response "deleted <n>\n"
   'DELETE /<slug>/': { response: string }
   // admin: rebuild manifests and owners; response "migrated <n>\n"
   'POST /_migrate': { response: string }
+  // the caller of this token (JSON; KV store too)
+  'GET /_api/whoami': { response: WhoAmI }
   // your CLI tokens, newest first (JSON)
   'GET /_api/tokens': { response: TokenInfo[] }
   // revoke a token of yours; "current": the token of this request
@@ -101,10 +109,23 @@ export interface TokenInfo {
   revoked_at: number | null
 }
 
+export interface WhoAmI {
+  kind: 'user' | 'service'
+  // a service token: the owner of the shares it makes (ServiceTokenCreate)
+  email: string
+  admin: boolean
+  // id of this token; null for the shared UPLOAD_TOKEN
+  token: string | null
+  // service tokens only
+  agent?: string
+  scopes?: string[]
+}
+
 // A service token acts as agent:<name>: it is the created_by of its
 // versions, and the owner of the shares it makes unless on_behalf_of names a
 // person. It can only publish (/_blobs, /_publish), read and delete shares,
-// and read and write collections, in scope; other routes give 403. Scopes:
+// and read and write collections, in scope, and GET /_api/whoami; other
+// routes give 403. Scopes:
 // "read:<collection>" or "write:<collection>" (write implies read); a
 // trailing "*" matches any rest, "write:metareview/*". A share is in scope
 // when its collection is.
@@ -234,6 +255,8 @@ export interface ShareManifest {
 export interface PublishResponse {
   slug: string
   version: number
+  url: string // the share on the content host; follows the live version
+  versionUrl: string // this version only: <content>/<slug>@<version>/
 }
 
 // newline-separated values, each line ends with "\n"

@@ -119,7 +119,7 @@ ${rows.length ? `<table class="tl"><tr><th>agent and scopes</th><th>created</th>
 export async function tokenPage(url: URL, env: Env, email: string,
   created?: { token: string; name: string; service?: boolean }, error?: string) {
   const { app, content } = origins(url, env)
-  const install = `mkdir -p ~/bin && curl -fsS ${app}/_cli -o ~/bin/share && chmod +x ~/bin/share && share login`
+  const install = `curl -fsSL ${app}/${hostKind(url, env) === 'app' ? 'install.sh' : '_install.sh'} | sh && share login`
   const skill = `mkdir -p ~/.claude/skills/mb-shares && curl -fsS ${app}/_skill -o ~/.claude/skills/mb-shares/SKILL.md`
   const rows = (await listTokens(env, email)).map((t) => {
     const live = !t.revoked_at && !(t.expires_at && t.expires_at <= Date.now())
@@ -145,7 +145,7 @@ export async function tokenPage(url: URL, env: Env, email: string,
 <p class="sub">signed in as <code>${esc(email)}</code></p>
 ${error ? `<div class="step"><h2>not created</h2><p>${esc(error)}</p></div>` : ''}${shown}<div class="step">
 <h2><span class="k">1</span>install the <code>share</code> cli and log in</h2>
-<p>needs <code>~/bin</code> on your PATH. <code>share login</code> opens this site to approve a new token.</p>
+<p>installs to <code>~/.local/bin</code> (macOS, Linux). <code>share login</code> opens this site to approve a new token.</p>
 <pre><code>${esc(install)}</code></pre>
 </div>
 <div class="step">

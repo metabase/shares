@@ -4,3 +4,4 @@ node_modules/
 .impeccable/
 backfill-own.sh
 .dev.vars
+dist/
