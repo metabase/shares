@@ -1,6 +1,6 @@
 // Storage behind the routes. The routes see share files and share metadata
-// only, never KV keys, so a second adapter (R2 blobs + D1 metadata, SHR-4)
-// can replace store/kv.ts without route changes.
+// only, never KV keys or D1 rows. Adapters: store/d1r2.ts (R2 blobs + D1
+// metadata, versioned), store/kv.ts (the inherited KV layout, env.pub).
 //
 // Paths: a share file is "<slug>/<relative path>". A prefix is "<slug>/" or
 // "<slug>/<subdir>/", always with the trailing slash.
@@ -15,6 +15,18 @@ export interface ShareSummary {
   n: number // file count
   t: number // newest timestamp, 0 when unknown
   o?: string // owner email; undefined on legacy shares (= ADMIN_EMAIL)
+}
+
+// one file of a versioned publish (POST /_publish/<slug>)
+export interface CommitFile {
+  path: string // relative to the share
+  sha256: string // hex; the blob must be uploaded first
+  contentType?: string
+}
+
+// a request error the API answers with `status` and the message
+export class StoreError extends Error {
+  constructor(public status: number, message: string) { super(message) }
 }
 
 // email -> view count and last view (ms)
@@ -34,8 +46,8 @@ export interface ShareStore {
   // heal (default true): rebuild a missing manifest from the stored files.
   // heal false is a cheap existence check for redirects.
   manifest(slug: string, opts?: { heal?: boolean }): Promise<Manifest | null>
-  // record the files of a publish, written after the uploads
-  finalize(slug: string, files: string[], owner: string): Promise<Manifest>
+  // record the files of a publish, written after the uploads by `by`
+  finalize(slug: string, files: string[], owner: string, by: string): Promise<Manifest>
   // full paths of the files under a prefix, from the slug's manifest
   filesUnder(prefix: string): Promise<string[]>
   // every share, by slug
@@ -51,4 +63,12 @@ export interface ShareStore {
   // publish count per email
   pushes(): Promise<Record<string, number>>
   countPush(who: string): Promise<void>
+
+  // Versioned publish, D1+R2 only: blobs first, then one commit that makes
+  // a new version live. Absent on the KV adapter.
+  // shas the store does not have
+  missingBlobs?(shas: string[]): Promise<string[]>
+  putBlob?(sha: string, body: ArrayBuffer): Promise<void>
+  // returns the new version number
+  commit?(slug: string, files: CommitFile[], by: string, message?: string): Promise<number>
 }
