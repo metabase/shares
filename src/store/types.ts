@@ -83,8 +83,8 @@ export interface ShareStore {
   // shas the store does not have
   missingBlobs?(shas: string[]): Promise<string[]>
   putBlob?(sha: string, body: ArrayBuffer): Promise<void>
-  // returns the new version number
-  commit?(slug: string, files: CommitFile[], by: string, message?: string, attrs?: ShareAttrs): Promise<number>
+  // returns the new version number. owner: of a new share, default by
+  commit?(slug: string, files: CommitFile[], by: string, message?: string, attrs?: ShareAttrs, owner?: string): Promise<number>
 
   // Public shares (SHR-9), D1+R2 only. isPublic is false on the KV adapter.
   isPublic(slug: string): Promise<boolean>

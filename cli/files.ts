@@ -85,7 +85,7 @@ export function collect(srcs: string[]): LocalFile[] {
 
 export const sha256 = (data: Uint8Array) => createHash('sha256').update(data).digest('hex')
 
-export const readBytes = (src: string) => new Uint8Array(readFileSync(src))
+export const readBytes = (src: string): Uint8Array<ArrayBuffer> => new Uint8Array(readFileSync(src))
 
 // The mirror keeps a copy of each share's current content at
 // <mirror>/<slug>/<path>; .sources maps slug to the source path (last

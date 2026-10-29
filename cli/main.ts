@@ -6,7 +6,8 @@ import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:
 import { hostname, tmpdir } from 'node:os'
 import { basename, dirname, join } from 'node:path'
 import type {
-  DeviceStartResponse, DeviceTokenResponse, PublishRequest, PublishResponse, VersionInfo, WhoAmI,
+  DeviceStartResponse, DeviceTokenResponse, PublishRequest, PublishResponse, ServiceTokenCreate, ServiceTokenCreated,
+  ServiceTokenInfo, TokenInfo, VersionInfo, WhoAmI,
 } from '../src/api-types'
 import { filePathUrl, parseLines, parseViews } from '../src/api-types'
 import { DEFAULT_APP, loadConfig, updateConfig, type Config } from './config'
@@ -36,6 +37,10 @@ export const HELP = `usage: share <file-or-dir> [name]        publish (new slug 
        share public <url-or-slug> on|off  open a share without login (if the server allows it)
        share -p|--public <file-or-dir> ...  publish, then make it public
        share api <path>                  GET /_api/<path> as JSON (collections, shares, versions)
+       share token ls [--service]        your CLI tokens (admin, --service: service tokens)
+       share token create <name> --scope <scope>... [--on-behalf-of <email>] [--days <n>]
+                                         admin: a service token for an agent or CI, shown once
+       share token revoke <id> [--service]  revoke a token
        share                             list all shares
 
 publish options:
@@ -43,6 +48,11 @@ publish options:
   -t, --title <text>        share title
   -m, --meta <key=value>    share metadata, repeatable
       --message <text>      version message (shown by \`share log\`)
+token options:
+      --scope <scope>       read:<collection> or write:<collection>, a trailing *
+                            matches any rest (write:metareview/*); repeatable
+      --on-behalf-of <email>  the person who owns the shares the token makes
+      --days <n>            expiry, 1 to 365 (default 365)
 global options:
       --json                one JSON value on stdout (errors too: {"error": ...})
   -V, --version             print the version
@@ -69,7 +79,7 @@ Config: ~/.config/shares/config (mode 0600), written by \`share login\`.
 SHARES_URL, SHARES_CONTENT_URL and SHARES_TOKEN in the environment override it.
 `
 
-const COMMANDS = new Set(['login', 'logout', 'whoami', 'rm', 'ls', 'cat', 'download', 'views', 'log', 'public', 'api', 'local', 'help', 'version'])
+const COMMANDS = new Set(['login', 'logout', 'whoami', 'rm', 'ls', 'cat', 'download', 'views', 'log', 'public', 'api', 'local', 'help', 'version', 'token'])
 
 export interface Opts {
   json: boolean
@@ -81,6 +91,10 @@ export interface Opts {
   title?: string
   meta: Record<string, string>
   message?: string
+  service: boolean
+  scopes: string[]
+  onBehalfOf?: string
+  days?: number
 }
 
 export interface Io {
@@ -92,7 +106,7 @@ export interface Io {
 }
 
 export function parseArgs(argv: string[]): { opts: Opts; args: string[] } {
-  const opts: Opts = { json: false, edit: false, exact: false, public: false, meta: {} }
+  const opts: Opts = { json: false, edit: false, exact: false, public: false, meta: {}, service: false, scopes: [] }
   const args: string[] = []
   const value = (i: number, flag: string) => {
     const v = argv[i + 1]
@@ -114,6 +128,15 @@ export function parseArgs(argv: string[]): { opts: Opts; args: string[] } {
       case '-c': case '--collection': opts.collection = value(i++, a); break
       case '-t': case '--title': opts.title = value(i++, a); break
       case '--message': opts.message = value(i++, a); break
+      case '--service': opts.service = true; break
+      case '--scope': opts.scopes.push(value(i++, a)); break
+      case '--on-behalf-of': opts.onBehalfOf = value(i++, a); break
+      case '--days': {
+        const n = Number(value(i++, a))
+        if (!Number.isInteger(n) || n < 1) throw new UsageError('--days takes a whole number of days')
+        opts.days = n
+        break
+      }
       case '-m': case '--meta': {
         const kv = value(i++, a)
         const j = kv.indexOf('=')
@@ -202,10 +225,13 @@ async function run(ctx: Ctx, cmd: string, a: string[]) {
     case 'help': ctx.io.stdout(HELP); return
     case 'version': ctx.say(`share ${VERSION}`); ctx.emit({ version: VERSION }); return
     case 'login': return login(ctx, a[0])
+    case 'token': return token(ctx, a)
     case 'logout': return logout(ctx)
     case 'whoami': {
       const w = await ctx.api.json<WhoAmI>('GET', '/_api/whoami')
-      ctx.say(`${w.email}${w.admin ? ' (admin)' : ''} on ${ctx.cfg.baseUrl}`)
+      ctx.say(w.kind === 'service'
+        ? `${w.agent} (service token, ${w.scopes?.join(',')}; shares owned by ${w.email}) on ${ctx.cfg.baseUrl}`
+        : `${w.email}${w.admin ? ' (admin)' : ''} on ${ctx.cfg.baseUrl}`)
       ctx.emit({ ...w, base_url: ctx.cfg.baseUrl, content_url: ctx.contentBase })
       return
     }
@@ -300,6 +326,48 @@ async function run(ctx: Ctx, cmd: string, a: string[]) {
   }
 }
 
+// CLI tokens: your own, or (admin, --service) service tokens (decision
+// service-tokens-scopes)
+async function token(ctx: Ctx, a: string[]) {
+  const usage = 'share token ls|create|revoke (share -h)'
+  const kind = ctx.opts.service ? '?kind=service' : ''
+  const day = (t: number | null) => t ? new Date(t).toISOString().slice(0, 10) : ''
+  switch (a[0]) {
+    case 'ls': case 'list': {
+      const ts = await ctx.api.json<(TokenInfo & Partial<ServiceTokenInfo>)[]>('GET', `/_api/tokens${kind}`)
+      ctx.say(table(ts.map((t) => [
+        t.id, t.name, t.revoked_at ? 'revoked' : t.expires_at && t.expires_at <= Date.now() ? 'expired' : `expires ${day(t.expires_at)}`,
+        t.last_used_at ? `used ${day(t.last_used_at)}` : 'never used',
+        ...(t.scopes ? [t.scopes.join(','), t.on_behalf_of ?? ''] : []),
+      ])))
+      ctx.emit(ts)
+      return
+    }
+    case 'create': {
+      const name = need(a[1], 'share token create <name> --scope <scope>...')
+      if (!ctx.opts.scopes.length) throw new UsageError('a service token needs at least one --scope')
+      const body: ServiceTokenCreate = {
+        name, scopes: ctx.opts.scopes,
+        ...(ctx.opts.onBehalfOf !== undefined && { on_behalf_of: ctx.opts.onBehalfOf }),
+        ...(ctx.opts.days !== undefined && { expires_days: ctx.opts.days }),
+      }
+      const t = await ctx.api.json<ServiceTokenCreated>('POST', '/_api/tokens', { json: body })
+      ctx.say(t.token)
+      if (!ctx.opts.json) ctx.note(`service token ${t.id} (agent:${t.name}, ${t.scopes.join(',')}); shown once. Use: SHARES_TOKEN=<token> SHARES_URL=${ctx.cfg.baseUrl} share ...`)
+      ctx.emit({ ...t, base_url: ctx.cfg.baseUrl, content_url: ctx.contentBase })
+      return
+    }
+    case 'revoke': case 'rm': {
+      const id = need(a[1], 'share token revoke <id> [--service]')
+      const r = await ctx.api.json<{ revoked: string }>('DELETE', `/_api/tokens/${enc(id)}${kind}`)
+      ctx.say(`revoked ${r.revoked}`)
+      ctx.emit(r)
+      return
+    }
+    default: throw new UsageError(`usage: ${usage}`)
+  }
+}
+
 async function list(ctx: Ctx) {
   const slugs = parseLines(await ctx.api.text('GET', '/_list'))
   ctx.say(slugs.join('\n'))
@@ -391,7 +459,7 @@ async function upload(api: Client, slug: string, files: LocalFile[], opts: Opts)
   }
 }
 
-async function legacyUpload(api: Client, slug: string, blobs: (LocalFile & { data: Uint8Array })[], opts: Opts) {
+async function legacyUpload(api: Client, slug: string, blobs: (LocalFile & { data: Uint8Array<ArrayBuffer> })[], opts: Opts) {
   await pool(blobs, PARALLEL, async (b) => { await api.text('PUT', filePathUrl('', `${slug}/${b.path}`), { body: b.data }) })
   const q = new URLSearchParams()
   if (opts.collection !== undefined) q.set('collection', opts.collection)

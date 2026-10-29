@@ -18,6 +18,8 @@ export default defineConfig({
     })),
   ],
   test: {
+    // the CLI tests run in Node: cli/vitest.config.ts
+    include: ['test/**/*.test.ts'],
     setupFiles: ['./test/apply-migrations.ts'],
   },
 })

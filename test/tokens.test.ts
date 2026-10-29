@@ -121,6 +121,27 @@ describe('token page', () => {
     expect(await (await onApp('/_cli')).text()).toMatch(/^#!\/usr\/bin\/env bash/)
     expect((await onApp('/_skill')).status).toBe(200)
   })
+
+  it('serves install.sh with the app origin as the login URL', async () => {
+    for (const path of ['/install.sh', '/_install.sh']) {
+      const sh = await (await onApp(path)).text()
+      expect(sh).toMatch(/^#!\/bin\/sh/)
+      expect(sh).toContain(`APP_URL="${APP}"`)
+    }
+    expect(await (await fetchWorker('/_install.sh')).text()).toContain(`APP_URL="${ORIGIN}"`)
+  })
+
+  it('shows the install.sh line on the token page', async () => {
+    const html = await (await onApp('/_token', { headers: { ...NAV, cookie: await appCookie('page@metabase.com') } })).text()
+    expect(html).toContain(`curl -fsSL ${APP}/install.sh | sh`)
+  })
+
+  it('tells the caller who the token belongs to', async () => {
+    const res = await onApp('/_api/whoami', { headers: bearer(await userToken('who@metabase.com')) })
+    expect(await res.json()).toMatchObject({ kind: 'user', email: 'who@metabase.com', admin: false })
+    const up = await onApp('/_api/whoami', { headers: bearer(env.UPLOAD_TOKEN!) })
+    expect(await up.json()).toEqual({ kind: 'user', email: env.ADMIN_EMAIL, admin: true, token: null })
+  })
 })
 
 describe('share login device flow', () => {

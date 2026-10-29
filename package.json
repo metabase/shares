@@ -5,7 +5,8 @@
   "scripts": {
     "dev": "wrangler dev",
     "typecheck": "tsc -p .",
-    "test": "tsc -p . && vitest run",
+    "test": "tsc -p . && tsc -p cli && vitest run && vitest run --config cli/vitest.config.ts",
+    "cli:build": "bun cli/build.ts",
     "db:migrate:local": "wrangler d1 migrations apply shares --local"
   },
   "dependencies": {
@@ -16,6 +17,7 @@
   "devDependencies": {
     "@cloudflare/vitest-plugin": "1.4.11",
     "@cloudflare/workers-types": "^5.20261029.1",
+    "@types/node": "22",
     "typescript": "5.9",
     "vitest": "~4.1.0",
     "wrangler": "4.156.0"

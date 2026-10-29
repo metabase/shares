@@ -56,6 +56,12 @@ export interface ApiEndpoints {
   // revoke a token of yours; "current": the token of this request
   // (`share logout`). 404 {"error"} when no live token has that id.
   'DELETE /_api/tokens/<id>': { response: { revoked: string } }
+  // admin: service tokens for agents and CI (SHR-13). POST makes one; the
+  // token is in the response only. ?kind=service on GET lists all of them,
+  // on DELETE revokes one of them.
+  'POST /_api/tokens': { body: ServiceTokenCreate; response: ServiceTokenCreated }
+  'GET /_api/tokens?kind=service': { response: ServiceTokenInfo[] }
+  'DELETE /_api/tokens/<id>?kind=service': { response: { revoked: string } }
   // `share login`, no bearer token (RFC 8628 device flow). Open
   // verification_uri_complete, then poll /_device/token every `interval`
   // seconds until it returns the token.
@@ -101,10 +107,46 @@ export interface TokenInfo {
 }
 
 export interface WhoAmI {
+  kind: 'user' | 'service'
+  // a service token: the owner of the shares it makes (ServiceTokenCreate)
   email: string
   admin: boolean
   // id of this token; null for the shared UPLOAD_TOKEN
   token: string | null
+  // service tokens only
+  agent?: string
+  scopes?: string[]
+}
+
+// A service token acts as agent:<name>: it is the created_by of its
+// versions, and the owner of the shares it makes unless on_behalf_of names a
+// person. It can only publish (/_blobs, /_publish), read and delete shares,
+// and read and write collections, in scope, and GET /_api/whoami; other
+// routes give 403. Scopes:
+// "read:<collection>" or "write:<collection>" (write implies read); a
+// trailing "*" matches any rest, "write:metareview/*". A share is in scope
+// when its collection is.
+export interface ServiceTokenCreate {
+  name: string
+  scopes: string[]
+  on_behalf_of?: string | null
+  // default and maximum 365
+  expires_days?: number
+}
+
+export interface ServiceTokenCreated {
+  id: string
+  token: string
+  name: string
+  scopes: string[]
+  on_behalf_of: string | null
+}
+
+export interface ServiceTokenInfo extends TokenInfo {
+  // the admin who made it
+  created_by: string
+  scopes: string[]
+  on_behalf_of: string | null
 }
 
 export interface DeviceStartResponse {
