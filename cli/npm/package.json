@@ -1,0 +1,10 @@
+{
+  "name": "@metabase/shares",
+  "version": "0.0.0",
+  "description": "share: publish files to Metabase shares and get a private link",
+  "type": "module",
+  "bin": { "share": "share.js" },
+  "files": ["share.js", "README.md"],
+  "engines": { "node": ">=20" },
+  "repository": { "type": "git", "url": "git+https://github.com/metabase/shares.git", "directory": "cli" }
+}

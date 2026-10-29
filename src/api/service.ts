@@ -5,6 +5,7 @@
 // api-types.ts.
 
 import type { Env } from '../env'
+import type { WhoAmI } from '../api-types'
 import { baseSlug, isQueryStore, pinned, StoreError } from '../store'
 import type { CommitFile, QueryStore, ShareAttrs, ShareStore } from '../store'
 import type { ServiceCaller } from '../tokens'
@@ -53,6 +54,11 @@ async function dispatch(req: Request, url: URL, env: Env, store: ShareStore & Qu
   const key = decodeURIComponent(url.pathname.slice(1))
   const get = req.method === 'GET'
 
+  if (key === '_api/whoami' && get) {
+    return Response.json({
+      kind: 'service', email: who.email, admin: false, token: who.id, agent: who.agent, scopes: who.scopes,
+    } satisfies WhoAmI)
+  }
   if (key === '_api/tokens/current' && req.method === 'DELETE') {
     await revokeServiceToken(env, who.agent, who.id)
     return Response.json({ revoked: who.id })
