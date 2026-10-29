@@ -27,7 +27,7 @@ export interface AuditEntry {
   share: string | null
 }
 
-import type { Collection, CollectionUpdate, ShareAttrs, ShareInfo, ShareManifest, VersionInfo } from '../api-types'
+import type { Collection, CollectionUpdate, ImportRequest, ImportResponse, ShareAttrs, ShareInfo, ShareManifest, VersionInfo } from '../api-types'
 
 export type { Collection, CollectionUpdate, ShareAttrs, ShareInfo, ShareManifest, VersionInfo }
 
@@ -93,6 +93,10 @@ export interface ShareStore {
   // set the public bit and add an audit row, in one batch
   setPublic?(slug: string, on: boolean, by: string): Promise<void>
   audit?(limit: number): Promise<AuditEntry[]>
+
+  // One share from the mb-shares KV export (SHR-10), D1+R2 only. by: the
+  // admin who imports, for the audit log.
+  importShare?(slug: string, r: ImportRequest, by: string): Promise<ImportResponse>
 }
 
 // filters of queryShares; all given ones must match
