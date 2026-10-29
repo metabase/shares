@@ -35,6 +35,8 @@ usage: share <file-or-dir> [name]        publish (new slug w/ random suffix)
        share ls <url-or-slug>            list files in a share
        share --local <url-or-slug>[/file]  print the local path a share came from
        share views <url-or-slug>         who viewed a share (email, count, last)
+       share public <url-or-slug> on|off  open a share without login (if the server allows it)
+       share -p|--public <file-or-dir> ...  publish, then make it public
        share                             list all shares
 
 examples:
@@ -77,6 +79,11 @@ EOF
     out="$(auth "$BASE_URL/$(enc "$slug")/_views")"
     [ -n "$out" ] || { echo "no views yet" >&2; exit 0; }
     printf '%s\n' "$out" | column -t -s $'\t'
+    exit 0 ;;
+  public)
+    slug="$(deslug "${2:?usage: share public <url-or-slug> on|off}")"
+    printf '%s' "${3:?usage: share public <url-or-slug> on|off}" \
+      | auth -X POST --data-binary @- "$BASE_URL/_public/$(enc "$slug")"
     exit 0 ;;
   rm)
     slug="$(deslug "${2:?usage: share rm <slug>}")"
@@ -124,10 +131,11 @@ if [ $# -eq 0 ]; then
   exit 0
 fi
 
-EDIT=0 EXACT=0
+EDIT=0 EXACT=0 PUBLIC=0
 while :; do
   case "${1:-}" in
     -e|--edit)  EDIT=1; shift ;;
+    -p|--public) PUBLIC=1; shift ;;
     -x|--exact) EXACT=1; shift ;;
     *) break ;;
   esac
@@ -237,4 +245,10 @@ fi
 
 printf '%s\n' ${MAN[@]+"${MAN[@]}"} | auth -X POST --data-binary @- "$BASE_URL/_finalize/$(enc "$NAME")" > /dev/null
 
+if [ "$PUBLIC" = 1 ]; then
+  printf on | auth -X POST --data-binary @- "$BASE_URL/_public/$(enc "$NAME")" > /dev/null \
+    || { echo "uploaded, but could not make it public (server flag off?)" >&2; exit 1; }
+  echo "uploaded (public: opens without login)" >&2
+  exit 0
+fi
 echo "uploaded" >&2

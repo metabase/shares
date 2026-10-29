@@ -31,6 +31,8 @@ bucket_name = "shares-blobs"
 GOOGLE_CLIENT_ID = "1089089243557-frsr7vf4s7pja4b3uq33naughhh0gk1m.apps.googleusercontent.com"
 ALLOWED_DOMAIN = "metabase.com"
 ADMIN_EMAIL = "bryan@metabase.com"
+# PUBLIC_SHARING = "1"  -- owners can mark a share public (`share --public`),
+# readable without login. Unset (default): off, the API refuses it.
 
 # secrets (set via: bun x wrangler secret put <NAME>):
 #   GOOGLE_CLIENT_SECRET  -- from the Google OAuth client
@@ -86,3 +88,4 @@ bucket_name = "shares-blobs"
 ALLOWED_DOMAIN = "metabase.com"
 CONTENT_HOST = "shares.metabase.fyi"
 APP_HOST = "app.shares.metabase.fyi"
+# PUBLIC_SHARING is off here; set PUBLIC_SHARING = "1" to allow public shares

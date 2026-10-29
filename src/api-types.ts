@@ -42,6 +42,12 @@ export interface ApiEndpoints {
   'DELETE /<slug>/': { response: string }
   // admin: rebuild manifests and owners; response "migrated <n>\n"
   'POST /_migrate': { response: string }
+  // make a share public (readable without login) or private. "on": owner
+  // only, 403 "public sharing is disabled" when the server flag is off.
+  // "off": owner or admin. 404 when the slug does not exist; 501 on KV.
+  'POST /_public/<slug>': { body: 'on' | 'off'; response: 'on\n' | 'off\n' }
+  // admin: newest audit rows (?limit=1..1000, default 100)
+  'GET /_audit': { query: { limit?: number }; response: Lines<AuditLine> }
 }
 
 export interface PublishRequest {
@@ -63,6 +69,22 @@ export interface ViewLine {
   email: string
   count: number
   last: string
+}
+
+// one line of GET /_audit: tab-separated ISO time, actor email, action
+// (public.on, public.off), share slug
+export interface AuditLine {
+  at: string
+  actor: string
+  action: string
+  share: string
+}
+
+export function parseAudit(body: string): AuditLine[] {
+  return parseLines(body).map((l) => {
+    const [at, actor, action, share] = l.split('\t')
+    return { at, actor, action, share }
+  })
 }
 
 export function parseLines(body: string): string[] {

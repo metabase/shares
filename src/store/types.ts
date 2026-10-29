@@ -15,6 +15,15 @@ export interface ShareSummary {
   n: number // file count
   t: number // newest timestamp, 0 when unknown
   o?: string // owner email; undefined on legacy shares (= ADMIN_EMAIL)
+  pub?: boolean // owner marked it public (SHR-9); D1+R2 only
+}
+
+// one audit log row, newest first from audit()
+export interface AuditEntry {
+  at: number // ms since epoch
+  actor: string
+  action: string
+  share: string | null
 }
 
 // one file of a versioned publish (POST /_publish/<slug>)
@@ -71,4 +80,10 @@ export interface ShareStore {
   putBlob?(sha: string, body: ArrayBuffer): Promise<void>
   // returns the new version number
   commit?(slug: string, files: CommitFile[], by: string, message?: string): Promise<number>
+
+  // Public shares (SHR-9), D1+R2 only. isPublic is false on the KV adapter.
+  isPublic(slug: string): Promise<boolean>
+  // set the public bit and add an audit row, in one batch
+  setPublic?(slug: string, on: boolean, by: string): Promise<void>
+  audit?(limit: number): Promise<AuditEntry[]>
 }
