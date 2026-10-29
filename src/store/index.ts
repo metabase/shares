@@ -4,7 +4,7 @@ import { KvStore } from './kv'
 import type { ShareStore } from './types'
 
 export type { AuditEntry, CommitFile, Manifest, QueryStore, ShareAttrs, ShareFilter, ShareStore, ShareSummary, ViewLog } from './types'
-export { isQueryStore, StoreError } from './types'
+export { baseSlug, isQueryStore, pinned, StoreError } from './types'
 
 // The one place that picks the adapter. env.pub binds only KV.
 export function storeFor(env: Env): ShareStore {

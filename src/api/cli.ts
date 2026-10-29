@@ -3,8 +3,22 @@
 
 import type { Env } from '../env'
 import { isQueryStore, StoreError } from '../store'
+import { pinned } from '../store'
 import type { CommitFile, ShareAttrs, ShareStore } from '../store'
+import type { PublishResponse } from '../api-types'
+import { contentBase } from '../origins'
 import { jsonApi } from './json'
+
+// absolute links on the content host: the share follows the live version,
+// the version link stays on this version
+export function publishResponse(url: URL, env: Env, slug: string, version: number): PublishResponse {
+  const base = contentBase(url, env) || url.origin
+  return { slug, version, url: `${base}/${slug}/`, versionUrl: `${base}/${slug}@${version}/` }
+}
+
+// a slug a publish, claim or public switch can take: "<slug>@<n>" is a
+// version read path, not a share
+export const badSlug = (top: string) => !top || top.startsWith('_') || top.includes('/') || !!pinned(top)
 
 // ?collection=C&title=T&meta=k=v...; meta values are JSON strings
 function finalizeAttrs(q: URLSearchParams): ShareAttrs | undefined {
@@ -75,7 +89,7 @@ async function dispatch(req: Request, url: URL, env: Env, store: ShareStore, who
     }
     if (key.startsWith('_publish/') && req.method === 'POST') {
       const top = key.slice('_publish/'.length).replace(/\/$/, '')
-      if (!top || top.startsWith('_') || top.includes('/')) return new Response('bad slug\n', { status: 400 })
+      if (badSlug(top)) return new Response('bad slug\n', { status: 400 })
       const owner = await store.owner(top)
       if (owner && owner !== who && !admin) {
         return new Response(`owned by ${owner}\n`, { status: 403 })
@@ -85,7 +99,7 @@ async function dispatch(req: Request, url: URL, env: Env, store: ShareStore, who
       if (!Array.isArray(body.files)) return new Response('files missing\n', { status: 400 })
       const { title, collection, meta } = body
       const version = await store.commit(top, body.files, who, body.message, { title, collection, meta })
-      return Response.json({ slug: top, version })
+      return Response.json(publishResponse(url, env, top, version))
     }
     return new Response('not found\n', { status: 404 })
   }
@@ -95,7 +109,7 @@ async function dispatch(req: Request, url: URL, env: Env, store: ShareStore, who
   // refused while PUBLIC_SHARING is off. Each change is audit logged.
   if (key.startsWith('_public/') && req.method === 'POST') {
     const top = key.slice('_public/'.length).replace(/\/$/, '')
-    if (!top || top.startsWith('_') || top.includes('/')) return new Response('bad slug\n', { status: 400 })
+    if (badSlug(top)) return new Response('bad slug\n', { status: 400 })
     const v = (await req.text()).trim()
     if (v !== 'on' && v !== 'off') return new Response('body must be on or off\n', { status: 400 })
     if (!store.setPublic) return new Response('not supported\n', { status: 501 })
@@ -126,7 +140,7 @@ async function dispatch(req: Request, url: URL, env: Env, store: ShareStore, who
   // other writes; worst case an owner mis-lists their own share.
   if (key.startsWith('_finalize/')) {
     const top = key.slice('_finalize/'.length).replace(/\/$/, '')
-    if (!top || top.startsWith('_')) return new Response('bad slug\n', { status: 400 })
+    if (!top || top.startsWith('_') || pinned(top)) return new Response('bad slug\n', { status: 400 })
     const owner = await store.owner(top)
     if (owner && owner !== who && !admin) {
       return new Response(`owned by ${owner}\n`, { status: 403 })
@@ -170,6 +184,7 @@ async function dispatch(req: Request, url: URL, env: Env, store: ShareStore, who
   // without an owner is unclaimed; the first PUT claims it. Racers on the
   // same fresh slug are moot: random suffixes.
   const top = key.replace(/\/.*$/, '')
+  if (pinned(top)) return new Response('a version is read only\n', { status: 400 })
   const owner = await store.owner(top)
 
   if (owner && owner !== who && !admin) {

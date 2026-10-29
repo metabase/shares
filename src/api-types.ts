@@ -40,6 +40,9 @@ export interface ApiEndpoints {
   'POST /_finalize/<slug>': { query: FinalizeQuery; body: Lines<string>; response: 'ok\n' }
   // raw bytes of one file
   'GET /<slug>/<path>': { response: ArrayBuffer }
+  // the same file in version <n> (complete versions only). Browsers open
+  // /<slug>@<n>/ on the content host too. Writes to <slug>@<n> give 400.
+  'GET /<slug>@<n>/<path>': { response: ArrayBuffer }
   // who viewed the share (owner or admin)
   'GET /<slug>/_views': { response: Lines<ViewLine> }
   // remove the share and all its files; response "deleted <n>\n"
@@ -234,6 +237,8 @@ export interface ShareManifest {
 export interface PublishResponse {
   slug: string
   version: number
+  url: string // the share on the content host; follows the live version
+  versionUrl: string // this version only: <content>/<slug>@<version>/
 }
 
 // newline-separated values, each line ends with "\n"

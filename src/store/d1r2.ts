@@ -10,7 +10,7 @@
 // one D1 batch (a transaction) marks it complete and moves current_version.
 
 import type { Env } from '../env'
-import { StoreError } from './types'
+import { baseSlug, pinned, StoreError } from './types'
 import type {
   AuditEntry, Collection, CollectionUpdate, CommitFile, Manifest, QueryStore, ShareAttrs, ShareFilter, ShareInfo,
   ShareManifest, ShareStore, ShareSummary, VersionInfo, ViewLog,
@@ -116,6 +116,12 @@ const CURRENT_FILE = `SELECT f.sha256, f.size, f.content_type FROM shares s
   JOIN files f ON f.share = s.slug AND f.version = s.current_version
   WHERE s.slug = ? AND f.path = ?`
 
+// the file rows of a complete version, for "<slug>@<n>" reads (?1 slug, ?2 version)
+const PINNED_VERSION = `SELECT f.path, f.sha256, v.created_at, s.owner FROM versions v
+  JOIN shares s ON s.slug = v.share
+  JOIN files f ON f.share = v.share AND f.version = v.version
+  WHERE v.share = ?1 AND v.version = ?2 AND v.state = 'complete'`
+
 export class D1R2Store implements ShareStore, QueryStore {
   constructor(private env: Env) {}
 
@@ -128,9 +134,12 @@ export class D1R2Store implements ShareStore, QueryStore {
   }
 
   private async blob(path: string) {
-    const [slug, rest] = split(path)
+    const [top, rest] = split(path)
     if (!rest) return null
-    const row = await this.db.prepare(CURRENT_FILE).bind(slug, rest).first<{ sha256: string }>()
+    const pin = pinned(top)
+    const row = await (pin
+      ? this.db.prepare(`${PINNED_VERSION} AND f.path = ?3`).bind(pin.slug, pin.version, rest)
+      : this.db.prepare(CURRENT_FILE).bind(top, rest)).first<{ sha256: string }>()
     return row ? this.r2.get(blobKey(row.sha256)) : null
   }
 
@@ -211,6 +220,13 @@ export class D1R2Store implements ShareStore, QueryStore {
   // Nothing to heal: D1 is the record. Subdir paths are not shares.
   async manifest(slug: string) {
     if (slug.includes('/')) return null
+    const pin = pinned(slug)
+    if (pin) {
+      const { results } = await this.db.prepare(`${PINNED_VERSION} ORDER BY f.path`).bind(pin.slug, pin.version)
+        .all<{ path: string; created_at: number; owner: string }>()
+      if (!results.length) return null
+      return { files: results.map((r) => r.path), t: results[0].created_at, o: results[0].owner } satisfies Manifest
+    }
     const s = await this.db.prepare(
       'SELECT owner, updated_at, current_version FROM shares WHERE slug = ? AND current_version IS NOT NULL',
     ).bind(slug).first<{ owner: string; updated_at: number; current_version: number }>()
@@ -317,6 +333,12 @@ export class D1R2Store implements ShareStore, QueryStore {
   // always from the top slug's current version
   async filesUnder(prefix: string) {
     const [slug, rest] = split(prefix)
+    const pin = pinned(slug)
+    if (pin) {
+      const { results } = await this.db.prepare(`${PINNED_VERSION} AND substr(f.path, 1, ?3) = ?4 ORDER BY f.path`)
+        .bind(pin.slug, pin.version, rest.length, rest).all<{ path: string }>()
+      return results.map((r) => `${slug}/${r.path}`)
+    }
     const { results } = await this.db.prepare(`SELECT f.path FROM shares s
       JOIN files f ON f.share = s.slug AND f.version = s.current_version
       WHERE s.slug = ? AND substr(f.path, 1, ?) = ? ORDER BY f.path`)
@@ -374,7 +396,7 @@ export class D1R2Store implements ShareStore, QueryStore {
   async isPublic(slug: string) {
     const r = await this.db.prepare(
       'SELECT 1 AS ok FROM shares WHERE slug = ? AND public = 1 AND current_version IS NOT NULL',
-    ).bind(slug).first<{ ok: number }>()
+    ).bind(baseSlug(slug)).first<{ ok: number }>()
     return !!r
   }
 
