@@ -12,7 +12,7 @@ import { approvePath, deviceApi, formPost } from './web/tokens'
 import { serve } from './web/serve'
 import { managePost } from './web/manage'
 import { notFound } from './render/page'
-import { storeFor, type ShareStore } from './store'
+import { baseSlug, storeFor, type ShareStore } from './store'
 import { appBase, contentBase } from './origins'
 
 // a same-origin absolute path: "//host" and "/\host" are protocol-relative
@@ -87,7 +87,7 @@ function recordView(ctx: ExecutionContext, store: ShareStore, key: string, email
   res: Response, accept: string | null) {
   if (email && res.status === 200 && key && !key.startsWith('_') && !key.includes('/_')
       && accept?.includes('text/html')) {
-    ctx.waitUntil(store.recordView(key.split('/')[0], email))
+    ctx.waitUntil(store.recordView(baseSlug(key.split('/')[0]), email))
   }
 }
 
