@@ -37,3 +37,36 @@ id = "be3e6920240f4cebb6d0c0ab8d4c4f27"
 [env.pub.vars]
 PUBLIC = "1"
 ADMIN_EMAIL = "bryan.maass@gmail.com"
+
+# metabase: the Metabase Cloudflare account, zone metabase.fyi (SHR-2).
+#   bun x wrangler deploy --env metabase
+# shares.metabase.fyi holds share content only; app.shares.metabase.fyi holds the API,
+# login, tokens and UI (lll decision two-hosts-on-metabase-fyi).
+# main is a hello-world until the TS worker is ready to deploy here.
+# secrets: bun x wrangler secret put <NAME> --env metabase
+#   SESSION_SECRET        -- random, signs session cookies
+#   GOOGLE_CLIENT_SECRET  -- from the Internal OAuth client (SHR-3)
+[env.metabase]
+name = "shares"
+account_id = "4f68a0299231e43ec1c7f75c50d21cb6"
+main = "deploy/hello.js"
+workers_dev = false
+routes = [
+  { pattern = "shares.metabase.fyi", custom_domain = true },
+  { pattern = "app.shares.metabase.fyi", custom_domain = true },
+]
+
+[[env.metabase.d1_databases]]
+binding = "DB"
+database_name = "shares"
+database_id = "TBD"
+migrations_dir = "migrations"
+
+[[env.metabase.r2_buckets]]
+binding = "BLOBS"
+bucket_name = "shares-blobs"
+
+[env.metabase.vars]
+ALLOWED_DOMAIN = "metabase.com"
+CONTENT_HOST = "shares.metabase.fyi"
+APP_HOST = "app.shares.metabase.fyi"
