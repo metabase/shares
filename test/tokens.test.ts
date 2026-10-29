@@ -47,6 +47,9 @@ describe('CLI tokens', () => {
     expect(out.status).toBe(200)
     expect((await list(token)).status).toBe(401)
     expect((await onApp('/_api/tokens/current', { method: 'DELETE', headers: bearer(token) })).status).toBe(401)
+    const { results } = await env.DB.prepare("SELECT action FROM audit WHERE actor = 'lou@metabase.com' ORDER BY id")
+      .all<{ action: string }>()
+    expect(results.map((r) => r.action)).toEqual(['token.create', 'token.revoke'])
   })
 
   it('gives 401 to an expired token', async () => {

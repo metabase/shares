@@ -25,6 +25,11 @@ const hex = (bytes: ArrayBuffer | Uint8Array) =>
 
 const random = (n: number) => crypto.getRandomValues(new Uint8Array(n))
 
+// a row of the audit table (migration 0002): token.create, token.revoke
+const audit = (env: Env, actor: string, action: string, detail: Record<string, string>) =>
+  env.DB.prepare('INSERT INTO audit (at, actor, action, detail) VALUES (?, ?, ?, ?)')
+    .bind(Date.now(), actor, action, JSON.stringify(detail))
+
 export async function sha256(s: string) {
   return hex(await crypto.subtle.digest('SHA-256', new TextEncoder().encode(s)))
 }
@@ -40,6 +45,7 @@ export async function createToken(env: Env, owner: string, name: string) {
     env.DB.prepare(`INSERT INTO tokens (id, hash, name, owner, kind, created_at, expires_at)
       VALUES (?, ?, ?, ?, 'user', ?, ?)`)
       .bind(id, await sha256(token), name.slice(0, 100) || 'cli', owner, now, now + TOKEN_DAYS * 86400_000),
+    audit(env, owner, 'token.create', { id, name }),
   ])
   return { id, token }
 }
@@ -68,6 +74,7 @@ export async function listTokens(env: Env, owner: string) {
 export async function revokeToken(env: Env, owner: string, id: string) {
   const r = await env.DB.prepare(`UPDATE tokens SET revoked_at = ?
     WHERE id = ? AND owner = ? AND kind = 'user' AND revoked_at IS NULL`).bind(Date.now(), id, owner).run()
+  if (r.meta.changes) await audit(env, owner, 'token.revoke', { id }).run()
   return r.meta.changes > 0
 }
 
