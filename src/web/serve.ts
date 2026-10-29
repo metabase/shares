@@ -2,9 +2,14 @@ import { zipSync } from 'fflate'
 import type { Env } from '../env'
 import { ago, esc, notFound, page } from '../render/page'
 import { render } from '../render/files'
-import type { ShareStore } from '../store'
+import { isQueryStore, type ShareStore, type ShareSummary } from '../store'
+import type { ShareInfo } from '../api-types'
 import { contentBase, hostKind } from '../origins'
 import { approvePage, tokenPage } from './tokens'
+import { STYLE, collectionsPage, nav, sharePage } from './manage'
+
+const summary = (s: ShareInfo): [string, ShareSummary] =>
+  [s.slug, { n: s.fileCount, t: s.updatedAt, o: s.owner, ...(s.title ? { title: s.title } : {}) }]
 
 export async function serve(url: URL, email: string | null, env: Env, store: ShareStore, accept: string | null): Promise<Response> {
   const key = decodeURIComponent(url.pathname.slice(1))
@@ -13,17 +18,32 @@ export async function serve(url: URL, email: string | null, env: Env, store: Sha
 
   // PUBLIC: share content only. No listing (it would expose every slug and
   // burn the 1k/day KV list quota), no token page, no stats.
-  if (env.PUBLIC && (key === '' || key === '_token' || key === '_stats' || key === '_device')) return notFound()
+  if (env.PUBLIC && (key === '' || key === '_token' || key === '_stats' || key === '_device'
+    || key === '_collections' || key.startsWith('_s/'))) return notFound()
 
   if (key === '') {
     // /?mine: admin's bookmarkable "just my shares" view (non-admins
     // already see only their own)
-    const admin = email === env.ADMIN_EMAIL && !url.searchParams.has('mine')
-    // you see your shares; admin sees everyone's (with an owner column)
-    const mine = [...await store.shares()]
-      .filter(([, s]) => admin || (s.o || env.ADMIN_EMAIL) === email)
-    // newest first; pre-timestamp shares (no metadata) sink to the bottom
-    const sorted = mine.sort((a, b) => b[1].t - a[1].t || a[0].localeCompare(b[0]))
+    const isAdmin = email === env.ADMIN_EMAIL
+    const admin = isAdmin && !url.searchParams.has('mine')
+    // ?q=: full text search (D1+R2), best match first; ?c=: the shares of
+    // a collection, which every signed-in user can list (as the JSON API)
+    const q = url.searchParams.get('q')?.trim() || ''
+    const c = url.searchParams.get('c') || ''
+    const query = isQueryStore(store) ? store : null
+    let sorted: [string, ShareSummary][]
+    if (query && c) {
+      sorted = (await query.queryShares({ collection: c, limit: 1000 })).map(summary)
+    } else if (query && q) {
+      sorted = (await query.search(q, admin ? undefined : email!, 200)).map(summary)
+    } else {
+      // you see your shares; admin sees everyone's (with an owner column)
+      const mine = [...await store.shares()]
+        .filter(([, s]) => admin || (s.o || env.ADMIN_EMAIL) === email)
+      // newest first; pre-timestamp shares (no metadata) sink to the bottom
+      sorted = mine.sort((a, b) => b[1].t - a[1].t || a[0].localeCompare(b[0]))
+    }
+    const owners = admin || !!c
     // view logs, one get per row (reads are 100k/day; lists are the scarce thing)
     const views = new Map(await Promise.all(sorted.map(async ([p]) =>
       [p, await store.views(p)] as const)))
@@ -37,12 +57,14 @@ export async function serve(url: URL, email: string | null, env: Env, store: Sha
     }
     const rows = sorted.map(([p, s]) =>
       `<tr data-p="/${esc(p)}/"><td class="s"><a href="${content}/${esc(p)}/">${esc(p)}</a>${
+        s.title ? ` <span class="ti">${esc(s.title)}</span>` : ''}${
         s.pub ? ' <span class="pub" title="opens without login">public</span>' : ''}</td>${
-        admin ? `<td class="o">${esc((s.o || env.ADMIN_EMAIL).split('@')[0])}</td>` : ''
+        owners ? `<td class="o">${esc((s.o || env.ADMIN_EMAIL).split('@')[0])}</td>` : ''
       }<td class="n">${s.n} file${
         s.n === 1 ? '' : 's'}</td>${viewCell(p)}<td class="t" title="${
         s.t ? new Date(s.t).toISOString() : 'published before timestamps existed'}">${
-        ago(s.t)}</td><td><button data-u="${content}/${esc(p)}/">url</button></td></tr>`)
+        ago(s.t)}</td><td><button data-u="${content}/${esc(p)}/">url</button>${
+        query ? ` <a class="mg" href="/_s/${encodeURIComponent(p)}" title="versions, diffs, rename, delete">manage</a>` : ''}</td></tr>`)
     return page('shares', `<style>
   .hd h1{margin:0 0 .5rem;font-size:1.3rem}
   #q{width:100%;box-sizing:border-box;font:inherit;font-size:.9rem;padding:.35em .6em;
@@ -56,6 +78,10 @@ export async function serve(url: URL, email: string | null, env: Env, store: Sha
   .lst td.s a{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:.85rem;
     text-decoration:none}
   .lst td.s a:hover{text-decoration:underline}
+  .lst .ti{color:var(--muted);font-size:.8rem}
+  .lst a.mg{font-size:.7rem;color:var(--muted);text-decoration:none;border:1px solid var(--border);
+    border-radius:5px;padding:.05em .45em}
+  .lst a.mg:hover{color:var(--fg);border-color:var(--muted)}
   .lst .pub{font-size:.7rem;color:var(--acc2);border:1px solid var(--acc2);border-radius:5px;
     padding:0 .35em}
   .lst td.o{color:var(--muted)}
@@ -80,13 +106,15 @@ export async function serve(url: URL, email: string | null, env: Env, store: Sha
   #pv pre{margin:0;padding:0;background:none;min-width:0;width:auto;left:0;transform:none;
     max-width:none;font-size:.75rem;line-height:1.4;white-space:pre-wrap;overflow:hidden}
 </style>
-<div class="hd"><h1>shares</h1></div>
-<input id="q" placeholder="filter" autofocus>
+${STYLE}<div class="app">${nav(email!, env)}</div>
+<div class="hd"><h1>${c ? `collection <code>${esc(c)}</code>` : q ? 'search' : 'shares'}</h1></div>
+<form method="get" action="/">${admin ? '' : isAdmin ? '<input type="hidden" name="mine" value="">' : ''}
+<input id="q" name="q" value="${esc(q)}" placeholder="${query ? 'filter; enter searches titles, files and metadata' : 'filter'}" autofocus></form>
 <table class="lst"><tbody id="shares">${rows.join('')}</tbody></table>
-${rows.length ? '' : '<p>No shares yet.</p>'}
-<p><small><a href="/_token">cli setup</a>${
-  email === env.ADMIN_EMAIL
-    ? admin ? ' · <a href="/?mine">mine only</a>' : ' · <a href="/">everyone</a>'
+${rows.length ? '' : `<p>${q || c ? 'No match.' : 'No shares yet.'}</p>`}
+<p><small>${q || c ? '<a href="/">all shares</a>' : ''}${
+  isAdmin && !c
+    ? `${q ? ' · ' : ''}${admin ? `<a href="/?mine${q ? `&q=${encodeURIComponent(q)}` : ''}">mine only</a>` : `<a href="/${q ? `?q=${encodeURIComponent(q)}` : ''}">everyone</a>`}`
     : ''}</small></p>
 <script>
 document.getElementById('q').addEventListener('input', function () {
@@ -185,17 +213,20 @@ pvPump()
     const bar = (n: number, max: number) => '█'.repeat(n && Math.max(1, Math.round(n / max * 30)))
     const maxS = Math.max(1, ...rows.map(([, b]) => b.shares))
     const maxP = Math.max(1, ...rows.map(([, b]) => b.pushes))
-    return page('stats', `<h1>stats</h1>
+    return page('stats', `${STYLE}<div class="app">${nav(email, env)}</div><h1>stats</h1>
 <table><tr><th>owner</th><th>shares</th><th></th><th>files</th><th>pushes</th><th></th></tr>${rows.map(([o, b]) =>
   `<tr><td>${esc(o.split('@')[0])}</td><td>${b.shares}</td><td>${bar(b.shares, maxS)}</td>
 <td>${b.files}</td><td>${b.pushes}</td><td>${bar(b.pushes, maxP)}</td></tr>`).join('')}</table>
-<p><small>pushes counted since the counter was added</small></p>`,
+<p><small>pushes counted since the counter was added</small></p>${await auditTable(store)}`,
     { poll: false })
   }
 
   // /_token: personal CLI token + setup, derived from the signed-in session
   if (key === '_token') return tokenPage(url, env, email!)
   if (key === '_device' || (key === 'cli' && hostKind(url, env) === 'app')) return approvePage(url, env, email!)
+
+  if (key === '_collections') return collectionsPage(env, store, email!)
+  if (key.startsWith('_s/')) return sharePage(url, env, store, email!, key.slice('_s/'.length))
 
   // reserved namespace: /_own/... must not render or list (slug enumeration)
   if (key.startsWith('_')) return notFound()
@@ -275,4 +306,15 @@ pvPump()
     }
   }
   return notFound()
+}
+
+// newest audit rows (admin stats page); empty on stores without a log
+async function auditTable(store: ShareStore) {
+  if (!store.audit) return ''
+  const rows = (await store.audit(100)).map((a) => `<tr><td title="${new Date(a.at).toISOString()}">${ago(a.at)}</td>
+<td>${esc(a.actor)}</td><td>${esc(a.action)}</td><td class="w mono">${a.share
+    ? `<a href="/_s/${encodeURIComponent(a.share)}">${esc(a.share)}</a>` : ''}</td></tr>`)
+  return `<div class="app"><h2>audit log</h2>${rows.length
+    ? `<table><tr><th>when</th><th>actor</th><th>action</th><th>share</th></tr>${rows.join('')}</table>`
+    : '<p class="sub">no rows yet</p>'}</div>`
 }

@@ -16,6 +16,7 @@ export interface ShareSummary {
   t: number // newest timestamp, 0 when unknown
   o?: string // owner email; undefined on legacy shares (= ADMIN_EMAIL)
   pub?: boolean // owner marked it public (SHR-9); D1+R2 only
+  title?: string // D1+R2 only
 }
 
 // one audit log row, newest first from audit()
@@ -66,8 +67,9 @@ export interface ShareStore {
   filesUnder(prefix: string): Promise<string[]>
   // every share, by slug
   shares(): Promise<Map<string, ShareSummary>>
-  // remove the share, its files and its bookkeeping; returns the file count
-  deleteShare(slug: string): Promise<number>
+  // remove the share, its files and its bookkeeping; returns the file count.
+  // by: who deletes it, for the audit log (D1+R2)
+  deleteShare(slug: string, by?: string): Promise<number>
   // rebuild every manifest and owner from the stored files; returns the
   // share count
   rebuildAll(): Promise<number>
@@ -115,6 +117,16 @@ export interface QueryStore {
   versions(slug: string): Promise<VersionInfo[]>
   // live version when version is undefined; null when there is none
   shareManifest(slug: string, version?: number): Promise<ShareManifest | null>
+
+  // Web app (SHR-15). Full text search over slug, title, collection, owner,
+  // file paths and metadata; every word is a prefix. Best match first.
+  search(q: string, owner: string | undefined, limit: number): Promise<ShareInfo[]>
+  // bytes of a blob from a manifest, any version
+  blobBytes(sha: string): Promise<ArrayBuffer | null>
+  // new slug for the share with all its versions; audit logged
+  rename(slug: string, to: string, by: string): Promise<void>
+  // new owner; audit logged. The caller checks the email.
+  transfer(slug: string, to: string, by: string): Promise<void>
 }
 
 export function isQueryStore(s: ShareStore): s is ShareStore & QueryStore {

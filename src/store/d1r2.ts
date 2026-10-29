@@ -106,6 +106,16 @@ const COLLECTION_SELECT = `SELECT c.slug, c.title, c.owner, c.meta, c.created_at
   (SELECT count(*) FROM shares s WHERE s.collection = c.slug AND s.current_version IS NOT NULL) AS shares
   FROM collections c`
 
+// FTS5 query of the search box: each word is a prefix term, all must match
+export function searchQuery(q: string) {
+  return q.split(/\s+/).filter(Boolean).slice(0, 10)
+    .map((w) => `"${w.replace(/"/g, '""')}"*`).join(' ')
+}
+
+// slug of a rename: one path segment, not reserved
+const SLUG = /^[A-Za-z0-9][A-Za-z0-9._-]{0,199}$/
+export const validSlug = (s: unknown): s is string => typeof s === 'string' && SLUG.test(s)
+
 const collectionInfo = (r: CollectionRow): Collection => ({
   slug: r.slug, title: r.title, owner: r.owner, meta: parseMeta(r.meta), shares: r.shares,
   createdAt: r.created_at, updatedAt: r.updated_at,
@@ -125,6 +135,25 @@ export class D1R2Store implements ShareStore, QueryStore {
   private ensureUser(email: string) {
     return this.db.prepare('INSERT OR IGNORE INTO users (email, created_at) VALUES (?, ?)')
       .bind(email, Date.now())
+  }
+
+  // The search row of a share, written again from its current state. Add
+  // these at the end of every batch that changes a share.
+  private reindex(slug: string) {
+    return [
+      this.db.prepare('DELETE FROM share_search WHERE slug = ?').bind(slug),
+      this.db.prepare(`INSERT INTO share_search (slug, title, collection, owner, paths, meta)
+        SELECT s.slug, coalesce(s.title, ''), coalesce(s.collection, ''), s.owner,
+          coalesce((SELECT group_concat(path, ' ') FROM files WHERE share = s.slug AND version = s.current_version), ''),
+          coalesce((SELECT group_concat(key || ' ' || value, ' ') FROM share_meta WHERE share = s.slug), '')
+        FROM shares s WHERE s.slug = ? AND s.current_version IS NOT NULL`).bind(slug),
+    ]
+  }
+
+  private auditRow(by: string, action: string, slug: string, detail?: object) {
+    return this.db.prepare(`INSERT INTO audit (at, actor, action, share, detail)
+      SELECT ?1, ?2, ?3, ?4, ?5 WHERE EXISTS (SELECT 1 FROM shares WHERE slug = ?4)`)
+      .bind(Date.now(), by, action, slug, detail ? JSON.stringify(detail) : null)
   }
 
   private async blob(path: string) {
@@ -246,6 +275,7 @@ export class D1R2Store implements ShareStore, QueryStore {
       this.db.prepare('UPDATE shares SET current_version = ?, updated_at = ? WHERE slug = ?')
         .bind(pv.version, now, slug),
       ...this.attrStatements(slug, by, attrs, now),
+      ...this.reindex(slug),
     ])
     return { files: [...new Set(files)].sort(), t: now, o: owner }
   }
@@ -306,6 +336,7 @@ export class D1R2Store implements ShareStore, QueryStore {
           .bind(slug, now),
         this.db.prepare(`SELECT ${NEW} AS version`).bind(slug),
         ...this.attrStatements(slug, owner, attrs, now),
+        ...this.reindex(slug),
       ])
       return (res[6].results[0] as { version: number }).version
     } catch (e) {
@@ -325,21 +356,25 @@ export class D1R2Store implements ShareStore, QueryStore {
   }
 
   async shares() {
-    const { results } = await this.db.prepare(`SELECT s.slug, s.owner, s.updated_at, s.public, v.file_count FROM shares s
+    const { results } = await this.db.prepare(`SELECT s.slug, s.owner, s.title, s.updated_at, s.public, v.file_count FROM shares s
       JOIN versions v ON v.share = s.slug AND v.version = s.current_version`)
-      .all<{ slug: string; owner: string; updated_at: number; public: number; file_count: number }>()
+      .all<{ slug: string; owner: string; title: string | null; updated_at: number; public: number; file_count: number }>()
     return new Map<string, ShareSummary>(results.map((r) =>
-      [r.slug, { n: r.file_count, t: r.updated_at, o: r.owner, ...(r.public ? { pub: true } : {}) }]))
+      [r.slug, { n: r.file_count, t: r.updated_at, o: r.owner, ...(r.title ? { title: r.title } : {}),
+        ...(r.public ? { pub: true } : {}) }]))
   }
 
   // Removes the share and (cascade) its versions, files, views and metadata,
   // then the blobs no other file row uses. Returns the live file count.
-  async deleteShare(slug: string) {
+  // by: the audit row's actor; no audit row without it.
+  async deleteShare(slug: string, by?: string) {
     const [cur, shas] = await this.db.batch<{ n: number } & { sha256: string }>([
       this.db.prepare(`SELECT v.file_count AS n FROM shares s
         JOIN versions v ON v.share = s.slug AND v.version = s.current_version WHERE s.slug = ?`).bind(slug),
       this.db.prepare('SELECT DISTINCT sha256 FROM files WHERE share = ?').bind(slug),
+      ...(by ? [this.auditRow(by, 'share.delete', slug)] : []),
       this.db.prepare('DELETE FROM shares WHERE slug = ?').bind(slug),
+      this.db.prepare('DELETE FROM share_search WHERE slug = ?').bind(slug),
     ])
     const list = JSON.stringify(shas.results.map((r) => r.sha256))
     const { results } = await this.db.prepare(`SELECT value AS sha256 FROM json_each(?)
@@ -443,6 +478,7 @@ export class D1R2Store implements ShareStore, QueryStore {
     await this.db.batch([
       ...this.attrStatements(slug, by, attrs, now),
       this.db.prepare('UPDATE shares SET updated_at = ? WHERE slug = ?').bind(now, slug),
+      ...this.reindex(slug),
     ])
   }
 
@@ -498,5 +534,57 @@ export class D1R2Store implements ShareStore, QueryStore {
       slug, version: v.version,
       files: results.map((r) => ({ path: r.path, sha256: r.sha256, size: r.size, contentType: r.content_type })),
     } satisfies ShareManifest
+  }
+
+  async search(q: string, owner: string | undefined, limit: number) {
+    const match = searchQuery(q)
+    if (!match) return []
+    const { results } = await this.db.prepare(`${SHARE_SELECT}
+      JOIN share_search ON share_search.slug = s.slug
+      WHERE share_search MATCH ?1 AND (?2 IS NULL OR s.owner = ?2) ORDER BY share_search.rank LIMIT ?3`)
+      .bind(match, owner ?? null, limit).all<ShareRow>()
+    return results.map(shareInfo)
+  }
+
+  async blobBytes(sha: string) {
+    if (!SHA.test(sha)) return null
+    return (await this.r2.get(blobKey(sha)))?.arrayBuffer() ?? null
+  }
+
+  // Moves every row of the share to the new slug in one batch. The FK
+  // checks wait for the end of the batch: versions and files move apart.
+  async rename(slug: string, to: string, by: string) {
+    if (!validSlug(to)) throw new StoreError(400, `bad slug: ${to}`)
+    if (await this.owner(to)) throw new StoreError(409, `${to} exists`)
+    if (!await this.owner(slug)) throw new StoreError(404, 'not found')
+    const move = (table: string, col: string) =>
+      this.db.prepare(`UPDATE ${table} SET ${col} = ?2 WHERE ${col} = ?1`).bind(slug, to)
+    try {
+      await this.db.batch([
+        this.db.prepare('PRAGMA defer_foreign_keys = true'),
+        this.db.prepare(`INSERT INTO shares (slug, owner, title, collection, current_version, public, created_at, updated_at)
+          SELECT ?2, owner, title, collection, current_version, public, created_at, ?3 FROM shares WHERE slug = ?1`)
+          .bind(slug, to, Date.now()),
+        move('versions', 'share'), move('files', 'share'), move('share_meta', 'share'), move('views', 'share'),
+        this.db.prepare('DELETE FROM shares WHERE slug = ?').bind(slug),
+        this.db.prepare('DELETE FROM share_search WHERE slug = ?').bind(slug),
+        ...this.reindex(to),
+        this.auditRow(by, 'share.rename', to, { from: slug }),
+      ])
+    } catch (e) {
+      if (/UNIQUE|PRIMARY KEY/i.test((e as Error).message)) throw new StoreError(409, `${to} exists`)
+      throw e
+    }
+  }
+
+  async transfer(slug: string, to: string, by: string) {
+    const from = await this.owner(slug)
+    if (!from) throw new StoreError(404, 'not found')
+    await this.db.batch([
+      this.ensureUser(to),
+      this.db.prepare('UPDATE shares SET owner = ?, updated_at = ? WHERE slug = ?').bind(to, Date.now(), slug),
+      ...this.reindex(slug),
+      this.auditRow(by, 'share.transfer', slug, { from, to }),
+    ])
   }
 }

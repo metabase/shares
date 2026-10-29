@@ -184,5 +184,5 @@ async function dispatch(req: Request, url: URL, env: Env, store: ShareStore, who
 
   // DELETE /name/ removes the whole share, plus bookkeeping. Always by
   // `top`, never the raw key: the owner check above only covers `top`.
-  return new Response(`deleted ${await store.deleteShare(top)}\n`)
+  return new Response(`deleted ${await store.deleteShare(top, who)}\n`)
 }
