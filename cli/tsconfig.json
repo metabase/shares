@@ -10,5 +10,5 @@
     "isolatedModules": true,
     "skipLibCheck": true
   },
-  "include": ["*.ts", "test/*.ts", "../src/api-types.ts"]
+  "include": ["*.ts", "test/*.ts", "../src/api-types.ts", "../scripts/migrate/*.ts"]
 }

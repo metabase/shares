@@ -11,6 +11,7 @@
 
 import type { Env } from '../env'
 import { baseSlug, pinned, StoreError } from './types'
+import type { ImportRequest, ImportResponse } from '../api-types'
 import type {
   AuditEntry, Collection, CollectionUpdate, CommitFile, Manifest, QueryStore, ShareAttrs, ShareFilter, ShareInfo,
   ShareManifest, ShareStore, ShareSummary, VersionInfo, ViewLog,
@@ -310,11 +311,9 @@ export class D1R2Store implements ShareStore, QueryStore {
     await this.r2.put(blobKey(sha), body)
   }
 
-  // One version from a manifest of uploaded blobs, in one D1 batch. Sizes
-  // come from R2, not from the client.
-  async commit(slug: string, files: CommitFile[], by: string, message?: string, attrs?: ShareAttrs, owner = by) {
-    if (!files.length) throw new StoreError(400, 'empty manifest')
-    if (attrs) checkAttrs(attrs)
+  // Checked file rows of a manifest, with sizes from R2, not from the client.
+  private async blobRows(files: CommitFile[]) {
+    if (!Array.isArray(files) || !files.length) throw new StoreError(400, 'empty manifest')
     const paths = new Set<string>()
     for (const f of files) {
       if (typeof f !== 'object' || !f) throw new StoreError(400, 'bad file entry')
@@ -328,8 +327,13 @@ export class D1R2Store implements ShareStore, QueryStore {
     const missing = uniq.filter((_, i) => !heads[i])
     if (missing.length) throw new StoreError(400, `missing blobs: ${missing.join(' ')}`)
     const size = new Map(uniq.map((s, i) => [s, heads[i]!.size]))
+    return files.map((f) => ({ path: f.path, sha256: f.sha256, contentType: f.contentType, size: size.get(f.sha256)! }))
+  }
 
-    const rows = files.map((f) => ({ ...f, size: size.get(f.sha256)! }))
+  // One version from a manifest of uploaded blobs, in one D1 batch.
+  async commit(slug: string, files: CommitFile[], by: string, message?: string, attrs?: ShareAttrs, owner = by) {
+    if (attrs) checkAttrs(attrs)
+    const rows = await this.blobRows(files)
     const total = rows.reduce((n, r) => n + r.size, 0)
     const now = Date.now()
     // the version this batch inserts: complete versions only grow, and the
@@ -359,6 +363,62 @@ export class D1R2Store implements ShareStore, QueryStore {
       if (/UNIQUE|PRIMARY KEY/i.test((e as Error).message)) throw new StoreError(409, 'concurrent publish, retry')
       throw e
     }
+  }
+
+  // One share from the mb-shares KV export (SHR-10): a complete version
+  // with the owner, uploader and times of the old store, and its view log.
+  // A second import of the same files changes only the views; other files
+  // make a new version. A share of another owner is refused.
+  async importShare(slug: string, r: ImportRequest, by: string): Promise<ImportResponse> {
+    if (!isObject(r)) throw new StoreError(400, 'bad import')
+    for (const k of ['owner', 'createdBy'] as const) {
+      if (typeof r[k] !== 'string' || !r[k].includes('@')) throw new StoreError(400, `bad ${k}`)
+    }
+    for (const k of ['createdAt', 'updatedAt'] as const) {
+      if (!Number.isSafeInteger(r[k]) || r[k] <= 0) throw new StoreError(400, `bad ${k}`)
+    }
+    if (r.views !== undefined && !isObject(r.views)) throw new StoreError(400, 'bad views')
+    const rows = await this.blobRows(r.files)
+    const views = Object.entries(r.views ?? {}).filter(([e, v]) =>
+      e.includes('@') && isObject(v) && Number.isSafeInteger(v.n) && Number.isSafeInteger(v.last))
+      .map(([email, v]) => ({ email, n: v.n, last: v.last }))
+    const viewRows = views.length ? [this.db.prepare(`INSERT INTO views (share, email, n, last_at)
+      SELECT ?1, json_extract(value, '$.email'), json_extract(value, '$.n'), json_extract(value, '$.last')
+      FROM json_each(?2) WHERE true
+      ON CONFLICT (share, email) DO UPDATE SET n = max(views.n, excluded.n), last_at = max(views.last_at, excluded.last_at)`)
+      .bind(slug, JSON.stringify(views))] : []
+
+    const owner = await this.owner(slug)
+    if (owner && owner !== r.owner) throw new StoreError(409, `owned by ${owner}`)
+    const cur = owner ? await this.shareManifest(slug) : null
+    const key = (fs: { path: string; sha256: string }[]) => fs.map((f) => `${f.path}\0${f.sha256}`).sort().join('\n')
+    if (cur && key(cur.files) === key(rows)) {
+      if (viewRows.length) await this.db.batch(viewRows)
+      return { slug, result: 'same', version: cur.version }
+    }
+
+    const total = rows.reduce((n, f) => n + f.size, 0)
+    const NEW = `(SELECT max(version) FROM versions WHERE share = ?1)`
+    const res = await this.db.batch([
+      this.ensureUser(r.owner),
+      this.ensureUser(r.createdBy),
+      this.db.prepare('INSERT OR IGNORE INTO shares (slug, owner, created_at, updated_at) VALUES (?, ?, ?, ?)')
+        .bind(slug, r.owner, r.createdAt, r.updatedAt),
+      this.db.prepare(`INSERT INTO versions (share, version, state, created_by, created_at, file_count, total_bytes, message)
+        SELECT ?1, coalesce(max(version), 0) + 1, 'complete', ?2, ?3, ?4, ?5, 'imported from mb-shares' FROM versions WHERE share = ?1`)
+        .bind(slug, r.createdBy, r.updatedAt, rows.length, total),
+      this.db.prepare(`INSERT INTO files (share, version, path, sha256, size, content_type)
+        SELECT ?1, ${NEW}, json_extract(value, '$.path'), json_extract(value, '$.sha256'),
+          json_extract(value, '$.size'), json_extract(value, '$.contentType') FROM json_each(?2)`)
+        .bind(slug, JSON.stringify(rows)),
+      this.db.prepare(`UPDATE shares SET current_version = ${NEW}, updated_at = max(updated_at, ?2) WHERE slug = ?1`)
+        .bind(slug, r.updatedAt),
+      this.db.prepare(`SELECT ${NEW} AS version`).bind(slug),
+      ...viewRows,
+      this.auditRow(by, 'share.import', slug),
+      ...this.reindex(slug),
+    ])
+    return { slug, result: owner ? 'updated' : 'created', version: (res[6].results[0] as { version: number }).version }
   }
 
   // always from the top slug's current version

@@ -52,6 +52,9 @@ export interface ApiEndpoints {
   'DELETE /<slug>/': { response: string }
   // admin: rebuild manifests and owners; response "migrated <n>\n"
   'POST /_migrate': { response: string }
+  // admin: one share from the mb-shares KV export (SHR-10), blobs first
+  // (/_blobs). 409 when another owner has the slug; 501 on KV.
+  'POST /_import/<slug>': { body: ImportRequest; response: ImportResponse }
   // the caller of this token (JSON; KV store too)
   'GET /_api/whoami': { response: WhoAmI }
   // your CLI tokens, newest first (JSON)
@@ -184,6 +187,26 @@ export interface ShareAttrs {
 export interface PublishRequest extends ShareAttrs {
   files: { path: string; sha256: string; contentType?: string }[]
   message?: string
+}
+
+// A share of the old mb-shares store. Times are ms since the epoch.
+export interface ImportRequest {
+  owner: string
+  // the uploader of the files (the version's created_by)
+  createdBy: string
+  createdAt: number // first upload
+  updatedAt: number // last upload or finalize; the version's time
+  files: { path: string; sha256: string; contentType?: string }[]
+  // email -> view count and last view; merged with max()
+  views?: Record<string, { n: number; last: number }>
+}
+
+// created: a new share; updated: a new version (other files); same: the
+// live version has these files, only the views changed
+export interface ImportResponse {
+  slug: string
+  result: 'created' | 'updated' | 'same'
+  version: number
 }
 
 export interface FinalizeQuery {
