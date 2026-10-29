@@ -1,5 +1,5 @@
 # Weekly: if npm has a newer reladraw than the first RELADRAWS pin in
-# src/index.js, open a PR putting the new exact version first (older pins
+# src/render/page.ts, open a PR putting the new exact version first (older pins
 # stay as fallbacks, max 3). Exact versions only -- never a floating range.
 name: reladraw bump
 
@@ -24,7 +24,7 @@ jobs:
           latest=$(curl -sf https://registry.npmjs.org/reladraw | jq -r '.["dist-tags"].latest')
           # registry data goes into sed and a commit: accept plain x.y.z only
           [[ $latest =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] || { echo "odd version: $latest"; exit 1; }
-          current=$(grep -oP "const RELADRAWS = \['\K[^']+" src/index.js)
+          current=$(grep -oP "const RELADRAWS = \['\K[^']+" src/render/page.ts)
           newest=$(printf '%s\n' "$current" "$latest" | sort -V | tail -1)
           if [ "$latest" = "$current" ] || [ "$newest" != "$latest" ]; then
             echo "pinned $current, npm latest $latest: nothing to do"; exit 0
@@ -33,8 +33,8 @@ jobs:
           if git ls-remote --exit-code origin "refs/heads/$branch" > /dev/null; then
             echo "$branch already exists"; exit 0
           fi
-          sed -i "s/const RELADRAWS = \['/const RELADRAWS = ['$latest', '/" src/index.js
-          sed -i -E "s/(const RELADRAWS = \[('[^']+', ){2}'[^']+'), '[^']+'\]/\1]/" src/index.js
+          sed -i "s/const RELADRAWS = \['/const RELADRAWS = ['$latest', '/" src/render/page.ts
+          sed -i -E "s/(const RELADRAWS = \[('[^']+', ){2}'[^']+'), '[^']+'\]/\1]/" src/render/page.ts
           git config user.name 'github-actions[bot]'
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
           git switch -c "$branch"
