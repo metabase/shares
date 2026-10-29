@@ -1,10 +1,11 @@
 // Bindings, vars and secrets of the Worker (wrangler.toml).
 export interface Env {
-  // share files and bookkeeping keys; the KV store adapter (store/kv.ts)
+  // share files and bookkeeping keys; the KV store adapter (store/kv.ts),
+  // used when DB or BLOBS is not bound (env.pub)
   SHARES: KVNamespace
-  // metadata (migrations/); the R2+D1 store adapter uses it (SHR-4)
+  // metadata (migrations/); the D1+R2 store adapter (store/d1r2.ts)
   DB: D1Database
-  // file blobs; the R2+D1 store adapter uses it (SHR-4)
+  // file blobs at blobs/<sha256>; the D1+R2 store adapter
   BLOBS: R2Bucket
 
   GOOGLE_CLIENT_ID: string

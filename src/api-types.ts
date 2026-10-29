@@ -17,9 +17,22 @@ export interface ApiEndpoints {
   // without prefix: slugs of your shares (admin: all), sorted.
   // with ?prefix=<slug>/ or <slug>/<dir>/: full paths of the files under it.
   'GET /_list': { query: { prefix?: string }; response: Lines<string> }
-  // upload one file; the first PUT to a slug claims it for the caller
+  // Versioned publish: 1. ask which blobs the store lacks, 2. upload them,
+  // 3. commit the manifest. The commit makes a new version live in one step;
+  // until then readers see the previous version. 501 on the KV store.
+  // sha256 hex lines in, the ones not stored out
+  'POST /_blobs/missing': { body: Lines<string>; response: Lines<string> }
+  // one blob; 400 when the body's sha256 differs
+  'PUT /_blobs/<sha256>': { body: ArrayBuffer; response: 'ok\n' }
+  // 400 on a bad path, duplicate path or missing blob; 403 owned by another
+  // user; 409 on a concurrent publish to the same slug (retry)
+  'POST /_publish/<slug>': { body: PublishRequest; response: PublishResponse }
+  // Legacy publish (bash CLI): PUT each file, then finalize. The PUTs fill a
+  // pending version; finalize makes it live. The first PUT to a slug claims
+  // it for the caller.
   'PUT /<slug>/<path>': { body: ArrayBuffer; response: 'ok\n' }
-  // after the uploads: newline-separated relative paths of the share
+  // after the uploads: newline-separated relative paths of the share; 400
+  // when one of them was not uploaded (the previous version stays live)
   'POST /_finalize/<slug>': { body: Lines<string>; response: 'ok\n' }
   // raw bytes of one file
   'GET /<slug>/<path>': { response: ArrayBuffer }
@@ -29,6 +42,16 @@ export interface ApiEndpoints {
   'DELETE /<slug>/': { response: string }
   // admin: rebuild manifests and owners; response "migrated <n>\n"
   'POST /_migrate': { response: string }
+}
+
+export interface PublishRequest {
+  files: { path: string; sha256: string; contentType?: string }[]
+  message?: string
+}
+
+export interface PublishResponse {
+  slug: string
+  version: number
 }
 
 // newline-separated values, each line ends with "\n"
