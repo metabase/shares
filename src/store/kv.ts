@@ -160,4 +160,7 @@ export class KvStore implements ShareStore {
     pushes[who] = (pushes[who] || 0) + 1
     await this.kv.put('_pushes', JSON.stringify(pushes))
   }
+
+  // no public bit in the KV layout: env.pub is public as a whole (PUBLIC)
+  async isPublic() { return false }
 }

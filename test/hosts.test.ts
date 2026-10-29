@@ -184,7 +184,7 @@ describe('app host', () => {
     }
   })
 
-  it('links the listing to the content host and the CLI config to both hosts', async () => {
+  it('links the listing to the content host', async () => {
     const token = await userToken('lin@metabase.com')
     const top = slug('lst')
     await publish(top, { 'a.txt': 'a' }, token)
@@ -192,8 +192,6 @@ describe('app host', () => {
     const list = await (await onApp('/', { headers: { ...NAV, cookie } })).text()
     expect(list).toContain(`href="${CONTENT}/${top}/"`)
     expect(list).toContain(`data-p="/${top}/"`)
-    const tok = await (await onApp('/_token', { headers: { ...NAV, cookie } })).text()
-    expect(tok).toContain(`'${APP}' '${CONTENT}'`)
   })
 
   it('returns the full main file text from _peek?full', async () => {

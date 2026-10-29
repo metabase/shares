@@ -1,9 +1,13 @@
 import type { Env } from './env'
 import {
   COOKIE, CONTENT_TAG, SESSION_DAYS, TICKET_SECONDS, handleCallback, redirectToGoogle, sessionEmail,
-  setCookie, signEmail, ticketTag, tokenEmail, verifyEmail,
+  authenticate, setCookie, signEmail, ticketTag, verifyEmail,
 } from './auth'
 import { cli } from './api/cli'
+import { tokensApi } from './api/tokens'
+import CLI_SH from '../bin/share' // text module (wrangler.toml rules)
+import SKILL_MD from '../skill/SKILL.md'
+import { approvePath, deviceApi, formPost } from './web/tokens'
 import { serve } from './web/serve'
 import { notFound } from './render/page'
 import { storeFor, type ShareStore } from './store'
@@ -25,9 +29,32 @@ function isApi(req: Request, url: URL) {
 const bearerOf = (req: Request) => (req.headers.get('authorization') || '').replace(/^Bearer /, '')
 
 async function api(req: Request, url: URL, env: Env, store: ShareStore) {
-  const who = await tokenEmail(env, bearerOf(req))
-  if (!who) return new Response('forbidden', { status: 403 })
-  return cli(req, url, env, store, who)
+  const who = await authenticate(env, bearerOf(req))
+  if (!who) return new Response('unauthorized\n', { status: 401, headers: { 'www-authenticate': 'Bearer' } })
+  return await tokensApi(req, url, env, who) ?? cli(req, url, env, store, who.email)
+}
+
+// Requests that need no bearer token and no session: the CLI script and
+// skill (the repo is public; `share login` needs the script first), and
+// the device flow endpoints. null: none of these.
+async function open(req: Request, url: URL, env: Env): Promise<Response | null> {
+  if (req.method === 'GET' && !env.PUBLIC) {
+    if (url.pathname === '/_cli') return new Response(CLI_SH)
+    if (url.pathname === '/_skill') return new Response(SKILL_MD)
+  }
+  return deviceApi(req, url, env)
+}
+
+// HTML form posts of a signed-in user: /_token (create, revoke) and the
+// approve page of `share login`. A browser sends Origin on every POST; it
+// must be this origin, so a page on another origin cannot submit them.
+const isFormPost = (req: Request, url: URL, env: Env) => req.method === 'POST' && !env.PUBLIC
+  && (url.pathname === '/_token' || url.pathname === approvePath(url, env))
+
+async function form(req: Request, url: URL, env: Env, email: string | null) {
+  if (req.headers.get('origin') !== url.origin) return forbidden()
+  if (!email) return new Response('not signed in; reload the page\n', { status: 401 })
+  return formPost(req, url, env, email)
 }
 
 // Pages that hold private data answer only top-level navigations: a fetch()
@@ -58,7 +85,14 @@ function recordView(ctx: ExecutionContext, store: ShareStore, key: string, email
 }
 
 const keyOf = (url: URL) => decodeURIComponent(url.pathname.slice(1))
-const isPrivatePage = (key: string) => key === '' || key === '_token' || key === '_stats'
+const isPrivatePage = (key: string) => key === '' || key === '_token' || key === '_stats' || key === '_device'
+
+// PUBLIC_SHARING: a share its owner marked public opens without login
+// (SHR-9). Only share paths: private pages and _-prefixed paths never.
+async function isPublicShare(env: Env, store: ShareStore, key: string) {
+  const top = key.split('/')[0]
+  return env.PUBLIC_SHARING === '1' && !!top && !top.startsWith('_') && store.isPublic(top)
+}
 
 // One origin for everything: hosts that match neither CONTENT_HOST nor
 // APP_HOST (workers.dev, wrangler dev, the pubshare deploy). Share HTML runs
@@ -67,6 +101,9 @@ export async function handle(req: Request, env: Env, ctx: ExecutionContext): Pro
   const url = new URL(req.url)
   const store = storeFor(env)
 
+  const pub = await open(req, url, env)
+  if (pub) return pub
+  if (isFormPost(req, url, env)) return lockDown(await form(req, url, env, await sessionEmail(req, env)))
   if (isApi(req, url)) return api(req, url, env, store)
 
   if (url.pathname === '/auth/callback' && !env.PUBLIC) return handleCallback(url, env)
@@ -74,9 +111,9 @@ export async function handle(req: Request, env: Env, ctx: ExecutionContext): Pro
   // PUBLIC (pubshare deploy): anonymous read-only viewers, no login.
   // Writes still go through the bearer-token branch above.
   const email = env.PUBLIC ? null : await sessionEmail(req, env)
-  if (!email && !env.PUBLIC) return redirectToGoogle(url, env)
-
   const key = keyOf(url)
+  if (!email && !env.PUBLIC && !await isPublicShare(env, store, key)) return redirectToGoogle(url, env)
+
   const priv = isPrivatePage(key)
   if (priv && !isNavigation(req)) return forbidden()
 
@@ -103,9 +140,9 @@ export async function contentHost(req: Request, env: Env, ctx: ExecutionContext)
   const key = keyOf(url)
   if (isPrivatePage(key)) return Response.redirect(`${app}/${key}`, 302)
 
-  // PUBLIC: anonymous viewers. The per-share public bit is SHR-9.
+  // PUBLIC: anonymous viewers; PUBLIC_SHARING: anonymous viewers of public shares
   const email = env.PUBLIC ? null : await sessionEmail(req, env, COOKIE.content, CONTENT_TAG)
-  if (!email && !env.PUBLIC) {
+  if (!email && !env.PUBLIC && !await isPublicShare(env, store, key)) {
     return Response.redirect(`${app}/_login?to=${encodeURIComponent(url.pathname + url.search)}`, 302)
   }
 
@@ -150,13 +187,16 @@ async function appRoutes(req: Request, env: Env): Promise<Response> {
   const origin = req.headers.get('origin')
   if (req.method !== 'GET' && req.method !== 'HEAD' && origin && origin !== url.origin) return forbidden()
 
+  const pub = await open(req, url, env)
+  if (pub) return pub
+  if (isFormPost(req, url, env)) return form(req, url, env, await sessionEmail(req, env, COOKIE.app))
   if (isApi(req, url)) return api(req, url, env, store)
 
   if (url.pathname === '/auth/callback' && !env.PUBLIC) return handleCallback(url, env, COOKIE.app)
 
   const key = keyOf(url)
   const peek = key.endsWith('/_peek')
-  if (!isPrivatePage(key) && key !== '_login' && !peek) {
+  if (!isPrivatePage(key) && key !== '_login' && key !== 'cli' && !peek) {
     return Response.redirect(`${contentBase(url, env)}${url.pathname}${url.search}`, 302)
   }
   if (env.PUBLIC) return notFound()

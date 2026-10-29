@@ -4,9 +4,64 @@
 # Viewers sign in with their @metabase.com Google account.
 set -euo pipefail
 
-CONF="${SHARE_CONF:-$HOME/.config/mb-shares/env}"
-[ -f "$CONF" ] || { echo "missing $CONF (needs BASE_URL and UPLOAD_TOKEN)" >&2; exit 1; }
-. "$CONF"
+# config: BASE_URL (the API), CONTENT_URL (share links), UPLOAD_TOKEN.
+# `share login` writes it; the old mb-shares path still works.
+CONF="${SHARE_CONF:-$HOME/.config/shares/config}"
+[ -n "${SHARE_CONF:-}" ] || [ -f "$CONF" ] || [ ! -f "$HOME/.config/mb-shares/env" ] || CONF="$HOME/.config/mb-shares/env"
+[ -f "$CONF" ] && . "$CONF"
+
+jget() { python3 -c 'import json,sys; print(json.loads(sys.argv[1]).get(sys.argv[2], ""))' "$1" "$2"; }
+
+case "${1:-}" in
+  login)
+    # device flow: the app host shows a code, a signed-in user approves it,
+    # this loop polls until the token comes
+    base="${2:-${SHARES_URL:-${BASE_URL:-https://app.shares.metabase.fyi}}}"; base="${base%/}"
+    name="$(python3 -c 'import json,sys; print(json.dumps({"name": sys.argv[1]}))' "share cli on $(hostname -s 2>/dev/null || echo unknown)")"
+    start="$(curl -sSf -X POST -H 'content-type: application/json' --data "$name" "$base/_device/code")"
+    code="$(jget "$start" user_code)"; open_url="$(jget "$start" verification_uri_complete)"
+    echo "code: $code" >&2
+    echo "approve it at: $open_url" >&2
+    if command -v open >/dev/null; then open "$open_url" 2>/dev/null || true
+    elif command -v xdg-open >/dev/null; then xdg-open "$open_url" >/dev/null 2>&1 || true; fi
+    dc="$(python3 -c 'import json,sys; print(json.dumps({"device_code": json.loads(sys.argv[1])["device_code"]}))' "$start")"
+    interval="$(jget "$start" interval)"; deadline=$(( $(date +%s) + $(jget "$start" expires_in) ))
+    while [ "$(date +%s)" -lt "$deadline" ]; do
+      sleep "$interval"
+      r="$(curl -sS -X POST -H 'content-type: application/json' --data "$dc" "$base/_device/token")"
+      case "$(jget "$r" error)" in
+        authorization_pending) continue ;;
+        access_denied) echo "denied in the browser; no token was created" >&2; exit 1 ;;
+        expired_token) break ;;
+        '') ;;
+        *) echo "login failed: $r" >&2; exit 1 ;;
+      esac
+      out="${SHARE_CONF:-$HOME/.config/shares/config}"
+      mkdir -p "$(dirname "$out")"
+      ( umask 077
+        { [ -f "$out" ] && grep -v -E '^(BASE_URL|CONTENT_URL|UPLOAD_TOKEN)=' "$out" || true
+          printf 'BASE_URL=%s\nCONTENT_URL=%s\nUPLOAD_TOKEN=%s\n' "$(jget "$start" base_url)" "$(jget "$start" content_url)" "$(jget "$r" token)"
+        } > "$out.tmp" )
+      mv "$out.tmp" "$out"; chmod 600 "$out"
+      echo "logged in as $(jget "$r" email); token saved to $out" >&2
+      exit 0
+    done
+    echo "code expired; run \`share login\` again" >&2; exit 1 ;;
+  logout)
+    [ -n "${UPLOAD_TOKEN:-}" ] || { echo "not logged in" >&2; exit 1; }
+    curl -sSf -X DELETE -H "Authorization: Bearer $UPLOAD_TOKEN" "$BASE_URL/_api/tokens/current" > /dev/null \
+      || echo "the server did not revoke the token (revoked already?); removing it here" >&2
+    ( umask 077; grep -v '^UPLOAD_TOKEN=' "$CONF" > "$CONF.tmp" || true )
+    mv "$CONF.tmp" "$CONF"
+    echo "logged out; token revoked" >&2
+    exit 0 ;;
+esac
+
+case "${1:-}" in
+  -h|--help|--local|local) ;;
+  *) [ -n "${BASE_URL:-}" ] && [ -n "${UPLOAD_TOKEN:-}" ] \
+       || { echo "not logged in: run \`share login\` (config $CONF)" >&2; exit 1; } ;;
+esac
 
 # every publish also lands in a local mirror (archive of everything shared);
 # override with MIRROR_DIR in the env file. `share rm` leaves the mirror.
@@ -35,6 +90,11 @@ usage: share <file-or-dir> [name]        publish (new slug w/ random suffix)
        share ls <url-or-slug>            list files in a share
        share --local <url-or-slug>[/file]  print the local path a share came from
        share views <url-or-slug>         who viewed a share (email, count, last)
+       share login [app-url]             approve a new token in the browser, save it
+       share logout                      revoke this machine's token
+       share public <url-or-slug> on|off  open a share without login (if the server allows it)
+       share -p|--public <file-or-dir> ...  publish, then make it public
+       share api <path>                  GET /_api/<path> as JSON (collections, shares, versions)
        share                             list all shares
 
 examples:
@@ -47,6 +107,10 @@ examples:
   share                            list your share slugs
   share cat https://…/report-a3f2b/   read a pasted share URL (agent-friendly)
   share rm cool-name-a3f2b         delete
+  share --collection metareview/pr-85416 --meta pr=85416 --title "Run 1" ./out
+                                   publish into a collection with metadata
+  share api 'shares?collection=metareview/pr-85416&meta.pr=85416'
+                                   list a collection's shares as JSON
 
 Viewers need a @metabase.com Google login; URLs are safe to paste anywhere.
 A single .md/.html file publishes as the share's index (remote name
@@ -55,8 +119,8 @@ as publish paths (drag-and-drop / "Copy as URL").
 Every publish also lands in ~/.local/share/mb-shares/<slug>/ (override with
 MIRROR_DIR in the env file) -- a mirror of each share's current content
 (-e replaces it; rm leaves it).
-First-time setup: sign in at the share site and visit /_token for your
-personal token, config snippet, and a copy of this script.
+First-time setup: `share login` (config in ~/.config/shares/config, mode
+0600). Tokens are listed and revoked at <app>/_token.
 EOF
     exit 0 ;;
   --local|local)
@@ -72,11 +136,19 @@ EOF
     fi
     [ -e "$MIRROR_DIR/$arg" ] && { printf '%s\n' "$MIRROR_DIR/$arg"; exit 0; }
     echo "no local copy of '$top' (published from another machine?)" >&2; exit 1 ;;
+  api)
+    auth "$BASE_URL/_api/${2#/}"
+    exit 0 ;;
   views)
     slug="$(deslug "${2:?usage: share views <url-or-slug>}")"
     out="$(auth "$BASE_URL/$(enc "$slug")/_views")"
     [ -n "$out" ] || { echo "no views yet" >&2; exit 0; }
     printf '%s\n' "$out" | column -t -s $'\t'
+    exit 0 ;;
+  public)
+    slug="$(deslug "${2:?usage: share public <url-or-slug> on|off}")"
+    printf '%s' "${3:?usage: share public <url-or-slug> on|off}" \
+      | auth -X POST --data-binary @- "$BASE_URL/_public/$(enc "$slug")"
     exit 0 ;;
   rm)
     slug="$(deslug "${2:?usage: share rm <slug>}")"
@@ -124,14 +196,24 @@ if [ $# -eq 0 ]; then
   exit 0
 fi
 
-EDIT=0 EXACT=0
+EDIT=0 EXACT=0 PUBLIC=0
+# share attributes, sent as the finalize query (meta values are strings)
+ATTRS=()
 while :; do
   case "${1:-}" in
     -e|--edit)  EDIT=1; shift ;;
+    -p|--public) PUBLIC=1; shift ;;
     -x|--exact) EXACT=1; shift ;;
+    -c|--collection) ATTRS+=("collection=$(enc "${2:?usage: --collection <slug>}")"); shift 2 ;;
+    -t|--title) ATTRS+=("title=$(enc "${2:?usage: --title <text>}")"); shift 2 ;;
+    -m|--meta)
+      case "${2:-}" in ?*=*) ;; *) echo "usage: --meta key=value" >&2; exit 1 ;; esac
+      ATTRS+=("meta=$(enc "$2")"); shift 2 ;;
     *) break ;;
   esac
 done
+QUERY=""
+[ "${#ATTRS[@]}" -gt 0 ] && QUERY="?$(IFS='&'; echo "${ATTRS[*]}")"
 
 # stdin mode (gh-gist muscle memory): `pbpaste | share -f slides.html [name]`
 if [ "${1:-}" = "-f" ] || [ "${1:-}" = "--filename" ]; then
@@ -235,6 +317,12 @@ fi
 # slug would finalize to a manifest of zero files and 404 on view
 [ "${#MAN[@]}" -eq 0 ] && { echo "no files found under $SRC -- nothing uploaded" >&2; exit 1; }
 
-printf '%s\n' ${MAN[@]+"${MAN[@]}"} | auth -X POST --data-binary @- "$BASE_URL/_finalize/$(enc "$NAME")" > /dev/null
+printf '%s\n' ${MAN[@]+"${MAN[@]}"} | auth -X POST --data-binary @- "$BASE_URL/_finalize/$(enc "$NAME")$QUERY" > /dev/null
 
+if [ "$PUBLIC" = 1 ]; then
+  printf on | auth -X POST --data-binary @- "$BASE_URL/_public/$(enc "$NAME")" > /dev/null \
+    || { echo "uploaded, but could not make it public (server flag off?)" >&2; exit 1; }
+  echo "uploaded (public: opens without login)" >&2
+  exit 0
+fi
 echo "uploaded" >&2

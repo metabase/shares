@@ -1,11 +1,27 @@
 // Bearer-token endpoints of the `share` CLI. Request and response shapes:
 // api-types.ts.
 
-import CLI_SH from '../../bin/share' // text module (wrangler.toml rules), served at /_cli
-import SKILL_MD from '../../skill/SKILL.md' // ditto, served at /_skill
 import type { Env } from '../env'
-import { StoreError } from '../store'
-import type { CommitFile, ShareStore } from '../store'
+import { isQueryStore, StoreError } from '../store'
+import type { CommitFile, ShareAttrs, ShareStore } from '../store'
+import { jsonApi } from './json'
+
+// ?collection=C&title=T&meta=k=v...; meta values are JSON strings
+function finalizeAttrs(q: URLSearchParams): ShareAttrs | undefined {
+  const a: ShareAttrs = {}
+  if (q.has('collection')) a.collection = q.get('collection')
+  if (q.has('title')) a.title = q.get('title')
+  const meta = q.getAll('meta')
+  if (meta.length) {
+    a.meta = {}
+    for (const m of meta) {
+      const i = m.indexOf('=')
+      if (i < 1) throw new StoreError(400, `bad meta: ${m} (want key=value)`)
+      a.meta[m.slice(0, i)] = m.slice(i + 1)
+    }
+  }
+  return Object.keys(a).length ? a : undefined
+}
 
 const lines = (xs: string[]) => new Response(xs.join('\n') + (xs.length ? '\n' : ''))
 
@@ -20,10 +36,6 @@ export async function cli(req: Request, url: URL, env: Env, store: ShareStore, w
 
 async function dispatch(req: Request, url: URL, env: Env, store: ShareStore, who: string): Promise<Response> {
   const admin = who === env.ADMIN_EMAIL
-
-  // the share script + Claude Code skill, for one-line installs from /_token
-  if (url.pathname === '/_cli') return new Response(CLI_SH)
-  if (url.pathname === '/_skill') return new Response(SKILL_MD)
 
   if (url.pathname === '/_list') {
     // ?prefix=slug/ lists every file in a share (any token -- download works
@@ -46,6 +58,8 @@ async function dispatch(req: Request, url: URL, env: Env, store: ShareStore, who
   const key = decodeURIComponent(url.pathname.slice(1))
   if (!key) return new Response('missing key', { status: 400 })
 
+  if (key === '_api' || key.startsWith('_api/')) return jsonApi(req, url, key, env, store, who)
+
   // Versioned publish (D1+R2 store): upload the blobs the store lacks, then
   // commit one manifest. The previous version stays live until the commit.
   if (key.startsWith('_blobs/') || key.startsWith('_publish/')) {
@@ -66,13 +80,45 @@ async function dispatch(req: Request, url: URL, env: Env, store: ShareStore, who
       if (owner && owner !== who && !admin) {
         return new Response(`owned by ${owner}\n`, { status: 403 })
       }
-      let body: { files?: CommitFile[]; message?: string }
+      let body: { files?: CommitFile[]; message?: string } & ShareAttrs
       try { body = await req.json() } catch { return new Response('bad json\n', { status: 400 }) }
       if (!Array.isArray(body.files)) return new Response('files missing\n', { status: 400 })
-      const version = await store.commit(top, body.files, who, body.message)
+      const { title, collection, meta } = body
+      const version = await store.commit(top, body.files, who, body.message, { title, collection, meta })
       return Response.json({ slug: top, version })
     }
     return new Response('not found\n', { status: 404 })
+  }
+
+  // POST /_public/<slug>, body "on" or "off" (SHR-9). Only the owner makes
+  // a share public; the owner or admin makes it private again. "on" is
+  // refused while PUBLIC_SHARING is off. Each change is audit logged.
+  if (key.startsWith('_public/') && req.method === 'POST') {
+    const top = key.slice('_public/'.length).replace(/\/$/, '')
+    if (!top || top.startsWith('_') || top.includes('/')) return new Response('bad slug\n', { status: 400 })
+    const v = (await req.text()).trim()
+    if (v !== 'on' && v !== 'off') return new Response('body must be on or off\n', { status: 400 })
+    if (!store.setPublic) return new Response('not supported\n', { status: 501 })
+    if (v === 'on' && env.PUBLIC_SHARING !== '1') {
+      return new Response('public sharing is disabled\n', { status: 403 })
+    }
+    const owner = await store.owner(top)
+    if (!owner) return new Response('not found\n', { status: 404 })
+    if (owner !== who && !(admin && v === 'off')) {
+      return new Response(`owned by ${owner}\n`, { status: 403 })
+    }
+    await store.setPublic(top, v === 'on', who)
+    return new Response(`${v}\n`)
+  }
+
+  // GET /_audit (admin): newest audit rows, tab-separated ISO time, actor,
+  // action, share
+  if (key === '_audit' && req.method === 'GET') {
+    if (!admin) return new Response('forbidden', { status: 403 })
+    if (!store.audit) return new Response('not supported\n', { status: 501 })
+    const n = Math.min(1000, Math.max(1, Number(url.searchParams.get('limit')) || 100))
+    return lines((await store.audit(n)).map((a) =>
+      `${new Date(a.at).toISOString()}\t${a.actor}\t${a.action}\t${a.share ?? ''}`))
   }
 
   // POST /_finalize/<slug>, body = newline-separated relative paths the CLI
@@ -87,14 +133,16 @@ async function dispatch(req: Request, url: URL, env: Env, store: ShareStore, who
     }
     const files = (await req.text()).split('\n').map((s) => s.trim()).filter(Boolean)
     if (!files.length) return new Response('empty manifest\n', { status: 400 })
-    await store.finalize(top, files, owner || who, who)
+    const attrs = finalizeAttrs(url.searchParams)
+    if (attrs && !isQueryStore(store)) return new Response('attributes not supported\n', { status: 501 })
+    await store.finalize(top, files, owner || who, who, attrs)
     // push counter for /_stats: one finalize = one push
     await store.countPush(who)
     return new Response('ok\n')
   }
 
   // _-prefixed top segments are reserved (store bookkeeping and the
-  // _list/_token/_stats/_cli/_peek/_zip/_views routes). Reads AND writes: a
+  // _list/_token/_stats/_cli/_peek/_zip/_views/_public/_audit routes). Reads AND writes: a
   // PUT to /_own/<slug> could hijack ownership on the KV store, a GET/list
   // under _own/ would enumerate every slug (share URLs are meant to be
   // unguessable).

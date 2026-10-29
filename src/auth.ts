@@ -1,4 +1,5 @@
 import type { Env } from './env'
+import { verifyToken } from './tokens'
 
 export const SESSION_DAYS = 7
 
@@ -18,20 +19,15 @@ export async function hmac(env: Env, data: string) {
   return b64url(await crypto.subtle.sign('HMAC', key, new TextEncoder().encode(data)))
 }
 
-// Personal CLI tokens are stateless: t.<emailB64>.<hmac("tok."+emailB64)>.
-// Verification recomputes the hmac -- nothing stored, nothing to revoke short
-// of rotating SESSION_SECRET. The "tok." prefix keeps tokens and session
-// cookies from doubling as each other despite the shared secret. The legacy
-// shared UPLOAD_TOKEN still works and acts as ADMIN_EMAIL.
-export async function tokenEmail(env: Env, bearer: string): Promise<string | null> {
+// The caller of a bearer request. CLI tokens live in D1 (tokens.ts); id is
+// null for the legacy shared UPLOAD_TOKEN, which acts as ADMIN_EMAIL and
+// cannot be revoked.
+export async function authenticate(env: Env, bearer: string): Promise<{ email: string; id: string | null } | null> {
   if (!bearer) return null
-  if (env.UPLOAD_TOKEN && bearer === env.UPLOAD_TOKEN) return env.ADMIN_EMAIL
+  if (env.UPLOAD_TOKEN && bearer === env.UPLOAD_TOKEN) return { email: env.ADMIN_EMAIL, id: null }
   // PUBLIC has no login, so no personal tokens: UPLOAD_TOKEN is the only writer
   if (env.PUBLIC) return null
-  const [tag, emailB64, sig] = bearer.split('.')
-  if (tag !== 't' || !emailB64 || !sig) return null
-  if (sig !== await hmac(env, `tok.${emailB64}`)) return null
-  try { return unb64(emailB64) } catch { return null }
+  return verifyToken(env, bearer)
 }
 
 // Signed, expiring email: <emailB64>.<exp>.<hmac(tag + emailB64.exp)>. The
