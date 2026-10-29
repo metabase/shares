@@ -140,9 +140,10 @@ describe('app host', () => {
   it('serves the API with a bearer token', async () => {
     const token = await userToken('ann@metabase.com')
     const top = slug('api')
-    const put = await onApp(`/${top}/a.txt`, { method: 'PUT', body: 'a', headers: { authorization: `Bearer ${token}` } })
-    expect(put.status).toBe(200)
-    const r = await onApp(`/${top}/a.txt`, { headers: { authorization: `Bearer ${token}` } })
+    const headers = { authorization: `Bearer ${token}` }
+    expect((await onApp(`/${top}/a.txt`, { method: 'PUT', body: 'a', headers })).status).toBe(200)
+    expect((await onApp(`/_finalize/${top}`, { method: 'POST', body: 'a.txt', headers })).status).toBe(200)
+    const r = await onApp(`/${top}/a.txt`, { headers })
     expect(await r.text()).toBe('a')
   })
 
