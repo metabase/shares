@@ -170,7 +170,8 @@ if [ "$EDIT" = 1 ]; then
   # so a share published moments ago would read as missing
   [ -n "$(auth "$BASE_URL/_list?prefix=$(enc "$NAME/")" || true)" ] \
     || { echo "no existing share '$NAME' (run \`share\` to list); omit -e to create new" >&2; exit 1; }
-  auth -X DELETE "$BASE_URL/$(enc "$NAME")/" > /dev/null
+  # no DELETE: the uploads fill a new version and finalize makes it live,
+  # so the old version stays up until then
   rm -rf "${MIRROR_DIR:?}/$NAME"   # mirror tracks the share's current content
 elif [ "$EXACT" = 1 ]; then
   # exact slug: no suffix, so check it's free first -- anyone's share, not

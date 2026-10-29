@@ -87,7 +87,7 @@ export class KvStore implements ShareStore {
       || (this.env.PUBLIC ? null : this.rebuildManifest(top))
   }
 
-  finalize(top: string, files: string[], owner: string) {
+  finalize(top: string, files: string[], owner: string, _by: string) {
     return this.writeManifest(top, files, owner, Date.now())
   }
 

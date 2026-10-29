@@ -4,11 +4,21 @@
 import CLI_SH from '../../bin/share' // text module (wrangler.toml rules), served at /_cli
 import SKILL_MD from '../../skill/SKILL.md' // ditto, served at /_skill
 import type { Env } from '../env'
-import type { ShareStore } from '../store'
+import { StoreError } from '../store'
+import type { CommitFile, ShareStore } from '../store'
 
 const lines = (xs: string[]) => new Response(xs.join('\n') + (xs.length ? '\n' : ''))
 
 export async function cli(req: Request, url: URL, env: Env, store: ShareStore, who: string): Promise<Response> {
+  try {
+    return await dispatch(req, url, env, store, who)
+  } catch (e) {
+    if (e instanceof StoreError) return new Response(`${e.message}\n`, { status: e.status })
+    throw e
+  }
+}
+
+async function dispatch(req: Request, url: URL, env: Env, store: ShareStore, who: string): Promise<Response> {
   const admin = who === env.ADMIN_EMAIL
 
   // the share script + Claude Code skill, for one-line installs from /_token
@@ -36,6 +46,35 @@ export async function cli(req: Request, url: URL, env: Env, store: ShareStore, w
   const key = decodeURIComponent(url.pathname.slice(1))
   if (!key) return new Response('missing key', { status: 400 })
 
+  // Versioned publish (D1+R2 store): upload the blobs the store lacks, then
+  // commit one manifest. The previous version stays live until the commit.
+  if (key.startsWith('_blobs/') || key.startsWith('_publish/')) {
+    if (!store.missingBlobs || !store.putBlob || !store.commit) {
+      return new Response('not supported\n', { status: 501 })
+    }
+    if (key === '_blobs/missing' && req.method === 'POST') {
+      return lines(await store.missingBlobs((await req.text()).split('\n').map((s) => s.trim()).filter(Boolean)))
+    }
+    if (key.startsWith('_blobs/') && req.method === 'PUT') {
+      await store.putBlob(key.slice('_blobs/'.length), await req.arrayBuffer())
+      return new Response('ok\n')
+    }
+    if (key.startsWith('_publish/') && req.method === 'POST') {
+      const top = key.slice('_publish/'.length).replace(/\/$/, '')
+      if (!top || top.startsWith('_') || top.includes('/')) return new Response('bad slug\n', { status: 400 })
+      const owner = await store.owner(top)
+      if (owner && owner !== who && !admin) {
+        return new Response(`owned by ${owner}\n`, { status: 403 })
+      }
+      let body: { files?: CommitFile[]; message?: string }
+      try { body = await req.json() } catch { return new Response('bad json\n', { status: 400 }) }
+      if (!Array.isArray(body.files)) return new Response('files missing\n', { status: 400 })
+      const version = await store.commit(top, body.files, who, body.message)
+      return Response.json({ slug: top, version })
+    }
+    return new Response('not found\n', { status: 404 })
+  }
+
   // POST /_finalize/<slug>, body = newline-separated relative paths the CLI
   // just uploaded: writes the manifest without any list(). Owner-gated like
   // other writes; worst case an owner mis-lists their own share.
@@ -48,7 +87,7 @@ export async function cli(req: Request, url: URL, env: Env, store: ShareStore, w
     }
     const files = (await req.text()).split('\n').map((s) => s.trim()).filter(Boolean)
     if (!files.length) return new Response('empty manifest\n', { status: 400 })
-    await store.finalize(top, files, owner || who)
+    await store.finalize(top, files, owner || who, who)
     // push counter for /_stats: one finalize = one push
     await store.countPush(who)
     return new Response('ok\n')
