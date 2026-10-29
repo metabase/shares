@@ -1,13 +1,15 @@
 import { env, exports } from 'cloudflare:workers'
 import { b64url, hmac } from '../src/auth'
+import { createToken } from '../src/tokens'
 
 export const ORIGIN = 'https://shares.test'
 export const ADMIN = env.ADMIN_EMAIL
 
 const emailB64 = (email: string) => b64url(new TextEncoder().encode(email))
 
-export async function userToken(email: string) {
-  return `t.${emailB64(email)}.${await hmac(env, `tok.${emailB64(email)}`)}`
+// a new CLI token of `email`, one per call
+export async function userToken(email: string, name = 'test') {
+  return (await createToken(env, email, name)).token
 }
 
 export async function sessionCookie(email: string) {

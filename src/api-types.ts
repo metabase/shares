@@ -1,8 +1,9 @@
 // HTTP API of the Worker, for clients (the TS CLI, SHR-7). No imports: the
 // CLI imports this file without the Worker's runtime types.
 //
-// Every endpoint takes `Authorization: Bearer <token>`. A missing or bad
-// token gives 403 "forbidden". Bodies are text unless noted. Errors are
+// Every endpoint but /_cli, /_skill and /_device/* takes
+// `Authorization: Bearer <token>`. A missing, bad, expired or revoked token
+// gives 401 "unauthorized". Bodies are text unless noted. Errors are
 // text with a trailing newline: 400 (reserved path, bad slug, empty
 // manifest), 403 ("owned by <email>"), 404 ("not found").
 
@@ -45,6 +46,18 @@ export interface ApiEndpoints {
   'DELETE /<slug>/': { response: string }
   // admin: rebuild manifests and owners; response "migrated <n>\n"
   'POST /_migrate': { response: string }
+  // your CLI tokens, newest first (JSON)
+  'GET /_api/tokens': { response: TokenInfo[] }
+  // revoke a token of yours; "current": the token of this request
+  // (`share logout`). 404 {"error"} when no live token has that id.
+  'DELETE /_api/tokens/<id>': { response: { revoked: string } }
+  // `share login`, no bearer token (RFC 8628 device flow). Open
+  // verification_uri_complete, then poll /_device/token every `interval`
+  // seconds until it returns the token.
+  'POST /_device/code': { body: { name?: string }; response: DeviceStartResponse }
+  // 400 with error authorization_pending (poll again), access_denied or
+  // expired_token (start again); 200 with the token
+  'POST /_device/token': { body: { device_code: string }; response: DeviceTokenResponse }
   // make a share public (readable without login) or private. "on": owner
   // only, 403 "public sharing is disabled" when the server flag is off.
   // "off": owner or admin. 404 when the slug does not exist; 501 on KV.
@@ -71,6 +84,33 @@ export interface ApiEndpoints {
   // files of the live version, or of ?version=<n>
   'GET /_api/shares/<slug>/manifest': { query: { version?: number }; response: ShareManifest }
 }
+
+export interface TokenInfo {
+  id: string
+  name: string
+  // ms since the epoch
+  created_at: number
+  last_used_at: number | null
+  expires_at: number | null
+  revoked_at: number | null
+}
+
+export interface DeviceStartResponse {
+  device_code: string
+  // XXXX-XXXX
+  user_code: string
+  verification_uri: string
+  verification_uri_complete: string
+  expires_in: number
+  interval: number
+  // the API (app host) and where share links point (content host)
+  base_url: string
+  content_url: string
+}
+
+export type DeviceTokenResponse =
+  | { error: 'authorization_pending' | 'access_denied' | 'expired_token' }
+  | { token: string; email: string; name: string }
 
 export type JsonValue = string | number | boolean | null | JsonValue[] | { [k: string]: JsonValue }
 
