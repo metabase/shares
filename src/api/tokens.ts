@@ -1,7 +1,8 @@
-// Bearer endpoints for CLI tokens: list, and revoke (`share logout`
+// Bearer endpoints for CLI tokens: whoami, list, and revoke (`share logout`
 // revokes "current", the token of the request). Types: api-types.ts.
 
 import type { Env } from '../env'
+import type { WhoAmI } from '../api-types'
 import { listTokens, revokeToken } from '../tokens'
 import { tokenInfo } from '../web/tokens'
 
@@ -11,6 +12,9 @@ const error = (status: number, msg: string) => Response.json({ error: msg }, { s
 export async function tokensApi(req: Request, url: URL, env: Env,
   who: { email: string; id: string | null }): Promise<Response | null> {
   const p = url.pathname
+  if (p === '/_api/whoami' && req.method === 'GET') {
+    return Response.json({ email: who.email, admin: who.email === env.ADMIN_EMAIL, token: who.id } satisfies WhoAmI)
+  }
   if (p !== '/_api/tokens' && !p.startsWith('/_api/tokens/')) return null
   if (!env.DB) return error(501, 'not supported')
 

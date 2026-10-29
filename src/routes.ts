@@ -7,6 +7,7 @@ import { cli } from './api/cli'
 import { tokensApi } from './api/tokens'
 import CLI_SH from '../bin/share' // text module (wrangler.toml rules)
 import SKILL_MD from '../skill/SKILL.md'
+import INSTALL_SH from '../cli/install.sh'
 import { approvePath, deviceApi, formPost } from './web/tokens'
 import { serve } from './web/serve'
 import { notFound } from './render/page'
@@ -34,13 +35,20 @@ async function api(req: Request, url: URL, env: Env, store: ShareStore) {
   return await tokensApi(req, url, env, who) ?? cli(req, url, env, store, who.email)
 }
 
-// Requests that need no bearer token and no session: the CLI script and
-// skill (the repo is public; `share login` needs the script first), and
+// install.sh with the origin that served it as the default app URL, so
+// `share login` after the install talks to the same deploy
+const installScript = (url: URL, env: Env) =>
+  new Response(INSTALL_SH.replaceAll('__APP_URL__', appBase(url, env) || url.origin),
+    { headers: { 'content-type': 'text/x-shellscript; charset=utf-8' } })
+
+// Requests that need no bearer token and no session: the CLI scripts and
+// skill (the repo is public; `share login` needs the CLI first), and
 // the device flow endpoints. null: none of these.
 async function open(req: Request, url: URL, env: Env): Promise<Response | null> {
   if (req.method === 'GET' && !env.PUBLIC) {
     if (url.pathname === '/_cli') return new Response(CLI_SH)
     if (url.pathname === '/_skill') return new Response(SKILL_MD)
+    if (url.pathname === '/_install.sh') return installScript(url, env)
   }
   return deviceApi(req, url, env)
 }
@@ -189,6 +197,7 @@ async function appRoutes(req: Request, env: Env): Promise<Response> {
 
   const pub = await open(req, url, env)
   if (pub) return pub
+  if (url.pathname === '/install.sh' && req.method === 'GET' && !env.PUBLIC) return installScript(url, env)
   if (isFormPost(req, url, env)) return form(req, url, env, await sessionEmail(req, env, COOKIE.app))
   if (isApi(req, url)) return api(req, url, env, store)
 

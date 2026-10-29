@@ -2,11 +2,11 @@ name = "mb-shares"
 main = "src/index.ts"
 compatibility_date = "2026-08-01"
 
-# bundle bin/share + skill/SKILL.md as text so the worker can serve them
-# at /_cli and /_skill
+# bundle bin/share, skill/SKILL.md and cli/install.sh as text so the worker
+# can serve them at /_cli, /_skill and /_install.sh
 [[rules]]
 type = "Text"
-globs = ["**/bin/share", "**/skill/SKILL.md"]
+globs = ["**/bin/share", "**/skill/SKILL.md", "**/cli/install.sh"]
 fallthrough = true
 
 [[kv_namespaces]]
