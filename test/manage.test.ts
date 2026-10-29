@@ -19,8 +19,11 @@ async function commit(top: string, files: Record<string, string>, token: string,
 }
 
 // a form submit of the share page, as a browser sends it
-async function submit(top: string, fields: Record<string, string>, email = OWNER, headers: Record<string, string> = {}) {
-  return fetchWorker(`/_s/${top}`, {
+const submit = (top: string, fields: Record<string, string>, email = OWNER, headers: Record<string, string> = {}) =>
+  formAt(`/_s/${top}`, fields, email, headers)
+
+async function formAt(path: string, fields: Record<string, string>, email = OWNER, headers: Record<string, string> = {}) {
+  return fetchWorker(path, {
     method: 'POST',
     body: new URLSearchParams(fields),
     headers: {
@@ -54,6 +57,10 @@ describe('line diff', () => {
 
   it('has no hunks for equal texts', () => {
     expect(hunks(lineDiff('a\nb', 'a\nb')!)).toEqual([])
+  })
+
+  it('gives an added file only added lines', () => {
+    expect(lineDiff('', 'x\ny\n')!.map((o) => o.t + o.s)).toEqual(['+x', '+y'])
   })
 })
 
@@ -194,6 +201,27 @@ describe('web app', () => {
     const s = await text('/_stats', ADMIN)
     expect(s.body).toContain('share.transfer')
     expect((await text('/_stats', OWNER)).status).toBe(403)
+  })
+
+  it('lets the admin create, list and revoke service tokens on the token page', async () => {
+    const name = slug('bot').toLowerCase()
+    expect((await formAt('/_token', { action: 'service-create', name, scopes: 'write:x/*' }, OWNER)).status).toBe(403)
+    expect((await text('/_token', OWNER)).body).not.toContain('service tokens')
+    const bad = await formAt('/_token', { action: 'service-create', name, scopes: 'nope' }, ADMIN)
+    expect(bad.status).toBe(400)
+    expect(await bad.text()).toContain('bad scopes')
+
+    const r = await formAt('/_token', { action: 'service-create', name, scopes: 'write:bots/* read:other', on_behalf_of: OWNER }, ADMIN)
+    expect(r.status).toBe(200)
+    const token = (await r.text()).match(/shr_[0-9a-f]{12}_[0-9a-f]{64}/)![0]
+    const list = await (await api('GET', '/_api/tokens?kind=service')).json() as any[]
+    const row = list.find((t) => t.name === name)
+    expect(row).toMatchObject({ scopes: ['write:bots/*', 'read:other'], on_behalf_of: OWNER })
+    expect((await api('GET', '/_api/shares?collection=bots/a', { token })).status).toBe(200)
+    expect((await text('/_token', ADMIN)).body).toContain(`agent:${name}`)
+
+    expect((await formAt('/_token', { action: 'service-revoke', id: row.id }, ADMIN)).status).toBe(303)
+    expect((await api('GET', '/_api/shares?collection=bots/a', { token })).status).toBe(401)
   })
 
   it('serves the pages on the app host and sends them there from the content host', async () => {

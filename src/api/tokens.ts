@@ -14,8 +14,9 @@ const serviceInfo = (t: ServiceTokenRow): ServiceTokenInfo => ({
   ...tokenInfo(t), created_by: t.owner, scopes: JSON.parse(t.scopes), on_behalf_of: t.on_behalf_of,
 })
 
-// the body of POST /_api/tokens, else an error message
-function serviceSpec(b: Partial<ServiceTokenCreate>, env: Env): ServiceTokenCreate | string {
+// the body of POST /_api/tokens, else an error message. The admin form
+// of /_token checks its fields with it too.
+export function serviceSpec(b: Partial<ServiceTokenCreate>, env: Env): ServiceTokenCreate | string {
   if (typeof b.name !== 'string' || !AGENT_NAME.test(b.name)) return 'bad name: [a-z0-9._-], at most 64'
   if (!Array.isArray(b.scopes) || !b.scopes.length || !b.scopes.every((s) => typeof s === 'string' && SCOPE.test(s))) {
     return 'bad scopes: a list of read:<collection> or write:<collection>, a trailing * matches any rest'

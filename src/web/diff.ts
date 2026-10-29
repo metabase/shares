@@ -6,10 +6,17 @@ export type Op = { t: ' ' | '-' | '+'; s: string }
 // LCS table cells; above this the diff is refused (memory and CPU time)
 const MAX_CELLS = 4_000_000
 
+// an empty text has no lines; a final newline ends the last line
+function lines(s: string) {
+  const out = s.split('\n')
+  if (out[out.length - 1] === '') out.pop()
+  return out
+}
+
 // null: too large to diff
 export function lineDiff(a: string, b: string): Op[] | null {
-  const x = a.split('\n')
-  const y = b.split('\n')
+  const x = lines(a)
+  const y = lines(b)
   let head = 0
   while (head < x.length && head < y.length && x[head] === y[head]) head++
   let tail = 0
