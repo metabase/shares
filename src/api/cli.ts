@@ -5,7 +5,7 @@ import type { Env } from '../env'
 import { isQueryStore, StoreError } from '../store'
 import { pinned } from '../store'
 import type { CommitFile, ShareAttrs, ShareStore } from '../store'
-import type { PublishResponse } from '../api-types'
+import type { ImportRequest, PublishResponse } from '../api-types'
 import { contentBase } from '../origins'
 import { jsonApi } from './json'
 
@@ -104,6 +104,18 @@ async function dispatch(req: Request, url: URL, env: Env, store: ShareStore, who
     return new Response('not found\n', { status: 404 })
   }
 
+  // POST /_import/<slug> (admin): one share of the mb-shares KV export
+  // (SHR-10, scripts/kv-import.ts). The slug is kept as it was.
+  if (key.startsWith('_import/') && req.method === 'POST') {
+    if (!admin) return new Response('forbidden', { status: 403 })
+    if (!store.importShare) return new Response('not supported\n', { status: 501 })
+    const top = key.slice('_import/'.length).replace(/\/$/, '')
+    if (badSlug(top)) return new Response('bad slug\n', { status: 400 })
+    let body: ImportRequest
+    try { body = await req.json() } catch { return new Response('bad json\n', { status: 400 }) }
+    return Response.json(await store.importShare(top, body, who))
+  }
+
   // POST /_public/<slug>, body "on" or "off" (SHR-9). Only the owner makes
   // a share public; the owner or admin makes it private again. "on" is
   // refused while PUBLIC_SHARING is off. Each change is audit logged.
@@ -156,7 +168,7 @@ async function dispatch(req: Request, url: URL, env: Env, store: ShareStore, who
   }
 
   // _-prefixed top segments are reserved (store bookkeeping and the
-  // _list/_token/_stats/_cli/_peek/_zip/_views/_public/_audit routes). Reads AND writes: a
+  // _list/_token/_stats/_cli/_peek/_zip/_views/_public/_audit/_import routes). Reads AND writes: a
   // PUT to /_own/<slug> could hijack ownership on the KV store, a GET/list
   // under _own/ would enumerate every slug (share URLs are meant to be
   // unguessable).
