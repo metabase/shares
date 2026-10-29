@@ -12,7 +12,7 @@ guessable.
 
 - CLI: `share` (repo `bin/share`, symlinked to `~/bin/share`)
 - Worker: `~/dv/mb-shares-worker` -> https://github.com/escherize/mb-shares-worker
-- Config: `~/.config/mb-shares/env` (BASE_URL + UPLOAD_TOKEN — never commit)
+- Config: `~/.config/mb-shares/env` (BASE_URL = API host, CONTENT_URL = share link host, UPLOAD_TOKEN — never commit)
 - This skill: repo `skill/SKILL.md`, served at `/_skill`, installable via the
   snippet on `/_token`
 

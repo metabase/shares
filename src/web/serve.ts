@@ -4,9 +4,12 @@ import { b64url, hmac } from '../auth'
 import { ago, esc, notFound, page } from '../render/page'
 import { render } from '../render/files'
 import type { ShareStore } from '../store'
+import { contentBase } from '../origins'
 
 export async function serve(url: URL, email: string | null, env: Env, store: ShareStore, accept: string | null): Promise<Response> {
   const key = decodeURIComponent(url.pathname.slice(1))
+  // share links on the listing go to the content host; '' on a single host
+  const content = contentBase(url, env)
 
   // PUBLIC: share content only. No listing (it would expose every slug and
   // burn the 1k/day KV list quota), no token page, no stats.
@@ -33,12 +36,12 @@ export async function serve(url: URL, email: string | null, env: Env, store: Sha
       return `<td class="v" title="${esc(who)}">${n} viewer${n === 1 ? '' : 's'}</td>`
     }
     const rows = sorted.map(([p, s]) =>
-      `<tr><td class="s"><a href="/${esc(p)}/">${esc(p)}</a></td>${
+      `<tr data-p="/${esc(p)}/"><td class="s"><a href="${content}/${esc(p)}/">${esc(p)}</a></td>${
         admin ? `<td class="o">${esc((s.o || env.ADMIN_EMAIL).split('@')[0])}</td>` : ''
       }<td class="n">${s.n} file${
         s.n === 1 ? '' : 's'}</td>${viewCell(p)}<td class="t" title="${
         s.t ? new Date(s.t).toISOString() : 'published before timestamps existed'}">${
-        ago(s.t)}</td><td><button data-u="/${esc(p)}/">url</button></td></tr>`)
+        ago(s.t)}</td><td><button data-u="${content}/${esc(p)}/">url</button></td></tr>`)
     return page('shares', `<style>
   .hd h1{margin:0 0 .5rem;font-size:1.3rem}
   #q{width:100%;box-sizing:border-box;font:inherit;font-size:.9rem;padding:.35em .6em;
@@ -91,7 +94,7 @@ document.getElementById('q').addEventListener('input', function () {
 })
 document.querySelectorAll('.lst button').forEach(function (b) {
   b.addEventListener('click', function () {
-    navigator.clipboard.writeText(location.origin + b.getAttribute('data-u')).then(function () {
+    navigator.clipboard.writeText(new URL(b.getAttribute('data-u'), location.href).href).then(function () {
       b.textContent = 'ok'; setTimeout(function () { b.textContent = 'url' }, 900)
     })
   })
@@ -112,18 +115,17 @@ pv.addEventListener('mouseenter', function () { clearTimeout(pvHide) })
 pv.addEventListener('mouseleave', function () { pvHide = setTimeout(hidePv, 150) })
 pv.querySelector('.c').addEventListener('click', function () {
   var b = this
-  fetch(pv.dataset.u, { cache: 'no-store' })
-    .then(function (r) { return r.text() })
-    .then(function (t) { return navigator.clipboard.writeText(t) })
+  fetch(pv.dataset.u + '_peek?full', { cache: 'no-store' })
+    .then(function (r) { return r.json() })
+    .then(function (j) { return navigator.clipboard.writeText(j.text) })
     .then(function () {
       b.textContent = 'copied'; setTimeout(function () { b.textContent = 'copy' }, 1000)
     })
     .catch(function () {})
 })
 document.querySelectorAll('#shares tr').forEach(function (tr) {
-  var a = tr.querySelector('td.s a')
-  if (!a) return
-  var u = a.getAttribute('href')
+  var u = tr.getAttribute('data-p')
+  if (!u) return
   tr.addEventListener('mouseenter', function () {
     clearTimeout(pvHide)
     pvCur = u
@@ -131,7 +133,7 @@ document.querySelectorAll('#shares tr').forEach(function (tr) {
       if (pvCur !== u) return
       pv.querySelector('.f').textContent = j.file
       pv.querySelector('pre').textContent = j.text
-      pv.dataset.u = u + j.file
+      pv.dataset.u = u
       var r = tr.getBoundingClientRect()
       pv.style.left = Math.min(r.left + 24, innerWidth - 400) + 'px'
       pv.style.display = 'block'
@@ -149,8 +151,8 @@ document.querySelectorAll('#shares tr').forEach(function (tr) {
 })
 // warm the peek cache so hovers are instant (4 in flight at a time)
 var pvq = Array.prototype.map.call(
-  document.querySelectorAll('#shares td.s a'),
-  function (a) { return a.getAttribute('href') })
+  document.querySelectorAll('#shares tr[data-p]'),
+  function (tr) { return tr.getAttribute('data-p') })
 var pvActive = 0
 function pvPump() {
   while (pvq.length && pvActive < 4) {
@@ -194,7 +196,8 @@ pvPump()
     const token = `t.${emailB64}.${await hmac(env, `tok.${emailB64}`)}`
     // one line, no heredoc: a copied heredoc missing its trailing newline
     // strands zsh at `heredoc>`, and fish has no heredocs at all
-    const conf = `mkdir -p ~/.config/mb-shares && printf 'BASE_URL=%s\\nUPLOAD_TOKEN=%s\\n' '${url.origin}' '${token}' > ~/.config/mb-shares/env`
+    // BASE_URL: the API (this origin); CONTENT_URL: where share links point
+    const conf = `mkdir -p ~/.config/mb-shares && printf 'BASE_URL=%s\\nCONTENT_URL=%s\\nUPLOAD_TOKEN=%s\\n' '${url.origin}' '${content || url.origin}' '${token}' > ~/.config/mb-shares/env`
     const install = `curl -sH "Authorization: Bearer ${token}" ${url.origin}/_cli -o ~/bin/share && chmod +x ~/bin/share`
     const skill = `mkdir -p ~/.claude/skills/mb-shares && curl -sH "Authorization: Bearer ${token}" ${url.origin}/_skill -o ~/.claude/skills/mb-shares/SKILL.md`
     return page('cli setup', `<style>
@@ -235,7 +238,8 @@ and it does the rest. Re-run anytime to pull the latest version.</p>
   // reserved namespace: /_own/... must not render or list (slug enumeration)
   if (key.startsWith('_')) return notFound()
 
-  // /slug/_peek: first lines of the share's main file, for hover previews
+  // /slug/_peek: first lines of the share's main file, for hover previews;
+  // ?full: all of its text, for the preview's copy button
   if (key.endsWith('/_peek')) {
     const prefix = key.slice(0, -'_peek'.length)
     const names = await store.filesUnder(prefix)
@@ -244,8 +248,10 @@ and it does the rest. Re-run anytime to pull the latest version.</p>
     const buf = await store.getBytes(pick)
     let text
     if (buf && !new Uint8Array(buf, 0, Math.min(4096, buf.byteLength)).includes(0)) {
-      text = new TextDecoder().decode(buf.slice(0, 8192)).split('\n').slice(0, 10)
-        .map((l) => (l.length > 160 ? l.slice(0, 160) + '…' : l)).join('\n')
+      text = url.searchParams.has('full')
+        ? new TextDecoder().decode(buf)
+        : new TextDecoder().decode(buf.slice(0, 8192)).split('\n').slice(0, 10)
+          .map((l) => (l.length > 160 ? l.slice(0, 160) + '…' : l)).join('\n')
     } else {
       text = names.map((n) => n.slice(prefix.length)).slice(0, 10).join('\n')
     }

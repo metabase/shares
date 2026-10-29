@@ -182,7 +182,8 @@ else
   NAME="$NAME-$(openssl rand -hex 3)"
 fi
 
-URL="$BASE_URL/$(enc "$NAME")/"
+# share links point to the content host; BASE_URL is the API
+URL="${CONTENT_URL:-$BASE_URL}/$(enc "$NAME")/"
 echo "$URL"
 
 # remember where this share came from, for `share --local <url>`
