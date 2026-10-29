@@ -1,11 +1,14 @@
 import type { Env } from './env'
 
-const SESSION_DAYS = 7
+export const SESSION_DAYS = 7
 
 export function b64url(bytes: ArrayBuffer | Uint8Array) {
   return btoa(String.fromCharCode(...new Uint8Array(bytes)))
     .replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '')
 }
+
+const b64email = (email: string) => b64url(new TextEncoder().encode(email))
+const unb64 = (s: string) => atob(s.replace(/-/g, '+').replace(/_/g, '/'))
 
 export async function hmac(env: Env, data: string) {
   const key = await crypto.subtle.importKey(
@@ -28,19 +31,55 @@ export async function tokenEmail(env: Env, bearer: string): Promise<string | nul
   const [tag, emailB64, sig] = bearer.split('.')
   if (tag !== 't' || !emailB64 || !sig) return null
   if (sig !== await hmac(env, `tok.${emailB64}`)) return null
-  try { return atob(emailB64.replace(/-/g, '+').replace(/_/g, '/')) } catch { return null }
+  try { return unb64(emailB64) } catch { return null }
 }
 
-export async function sessionEmail(req: Request, env: Env): Promise<string | null> {
-  const m = (req.headers.get('cookie') || '').match(/(?:^|;\s*)s=([^;]+)/)
-  if (!m) return null
-  const [emailB64, exp, sig] = m[1].split('.')
+// Signed, expiring email: <emailB64>.<exp>.<hmac(tag + emailB64.exp)>. The
+// tag keeps the values of one kind from doubling as another: '' for the app
+// session (and the legacy single-host session), 'c.' for the content host
+// cookie, 'tkt.<target>.' for login tickets.
+export async function signEmail(env: Env, email: string, ttl: number, tag = '') {
+  const emailB64 = b64email(email)
+  const exp = Math.floor(Date.now() / 1000) + ttl
+  return `${emailB64}.${exp}.${await hmac(env, `${tag}${emailB64}.${exp}`)}`
+}
+
+export async function verifyEmail(env: Env, value: string, tag = ''): Promise<string | null> {
+  const [emailB64, exp, sig] = value.split('.')
   if (!emailB64 || !exp || !sig) return null
   if (Number(exp) < Date.now() / 1000) return null
-  const expected = await hmac(env, `${emailB64}.${exp}`)
-  if (sig !== expected) return null
-  return atob(emailB64.replace(/-/g, '+').replace(/_/g, '/'))
+  if (sig !== await hmac(env, `${tag}${emailB64}.${exp}`)) return null
+  try { return unb64(emailB64) } catch { return null }
 }
+
+// Cookie names: 's' on the single host; __Host- on the split hosts, so the
+// cookie is host-only, Secure, Path=/ and a sibling *.metabase.fyi host
+// cannot set or shadow it.
+export const COOKIE = { combined: 's', app: '__Host-s', content: '__Host-c' } as const
+export const CONTENT_TAG = 'c.'
+
+export function cookieValue(req: Request, name: string): string | null {
+  for (const part of (req.headers.get('cookie') || '').split(/;\s*/)) {
+    const i = part.indexOf('=')
+    if (i > 0 && part.slice(0, i) === name) return part.slice(i + 1)
+  }
+  return null
+}
+
+export async function sessionEmail(req: Request, env: Env, name = 's', tag = ''): Promise<string | null> {
+  const v = cookieValue(req, name)
+  return v ? verifyEmail(env, v, tag) : null
+}
+
+export function setCookie(name: string, value: string, maxAge: number) {
+  return `${name}=${value}; Path=/; HttpOnly; Secure; SameSite=Lax; Max-Age=${maxAge}`
+}
+
+// Login ticket: the app host signs the viewer's email and the target URL on
+// the content host, valid TICKET_SECONDS. The content host accepts it only
+// for that exact target, then sets its own cookie.
+export const TICKET_SECONDS = 60
+export const ticketTag = (target: string) => `tkt.${target}.`
 
 export function redirectToGoogle(url: URL, env: Env) {
   const auth = new URL('https://accounts.google.com/o/oauth2/v2/auth')
@@ -54,7 +93,7 @@ export function redirectToGoogle(url: URL, env: Env) {
   return Response.redirect(auth.toString(), 302)
 }
 
-export async function handleCallback(url: URL, env: Env) {
+export async function handleCallback(url: URL, env: Env, cookie: string = COOKIE.combined) {
   const code = url.searchParams.get('code')
   if (!code) return new Response('missing code', { status: 400 })
 
@@ -84,9 +123,7 @@ export async function handleCallback(url: URL, env: Env) {
     payload.email?.toLowerCase().endsWith(`@${env.ALLOWED_DOMAIN}`)
   if (!ok) return new Response(`access limited to @${env.ALLOWED_DOMAIN} accounts`, { status: 403 })
 
-  const emailB64 = b64url(new TextEncoder().encode(payload.email.toLowerCase()))
-  const exp = Math.floor(Date.now() / 1000) + SESSION_DAYS * 86400
-  const sig = await hmac(env, `${emailB64}.${exp}`)
+  const session = await signEmail(env, payload.email.toLowerCase(), SESSION_DAYS * 86400)
 
   let dest = '/'
   try { dest = atob(url.searchParams.get('state') || '') || '/' } catch {}
@@ -98,8 +135,7 @@ export async function handleCallback(url: URL, env: Env) {
     status: 302,
     headers: {
       location: dest,
-      'set-cookie':
-        `s=${emailB64}.${exp}.${sig}; Path=/; HttpOnly; Secure; SameSite=Lax; Max-Age=${SESSION_DAYS * 86400}`,
+      'set-cookie': setCookie(cookie, session, SESSION_DAYS * 86400),
     },
   })
 }

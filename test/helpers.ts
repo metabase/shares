@@ -15,8 +15,11 @@ export async function sessionCookie(email: string) {
   return `s=${emailB64(email)}.${exp}.${await hmac(env, `${emailB64(email)}.${exp}`)}`
 }
 
-export function fetchWorker(path: string, init?: RequestInit) {
-  return exports.default.fetch(new Request(`${ORIGIN}${path}`, { redirect: 'manual', ...init }))
+export const CONTENT = `https://${env.CONTENT_HOST}`
+export const APP = `https://${env.APP_HOST}`
+
+export function fetchWorker(path: string, init?: RequestInit, origin = ORIGIN) {
+  return exports.default.fetch(new Request(`${origin}${path}`, { redirect: 'manual', ...init }))
 }
 
 // CLI request with a bearer token (default: the admin UPLOAD_TOKEN)
