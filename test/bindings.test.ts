@@ -8,7 +8,7 @@ describe('D1 schema', () => {
       .prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%' AND name NOT LIKE '_cf_%' AND name != 'd1_migrations' ORDER BY name")
       .all<{ name: string }>()
     expect(results.map((r) => r.name)).toEqual(
-      ['collections', 'device_codes', 'files', 'share_meta', 'shares', 'tokens', 'users', 'versions', 'views'])
+      ['audit', 'collections', 'device_codes', 'files', 'share_meta', 'shares', 'tokens', 'users', 'versions', 'views'])
   })
 
   it('stores a share with a version, files and metadata, and cascades deletes', async () => {

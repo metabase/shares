@@ -12,7 +12,7 @@
 import type { Env } from '../env'
 import { StoreError } from './types'
 import type {
-  Collection, CollectionUpdate, CommitFile, Manifest, QueryStore, ShareAttrs, ShareFilter, ShareInfo,
+  AuditEntry, Collection, CollectionUpdate, CommitFile, Manifest, QueryStore, ShareAttrs, ShareFilter, ShareInfo,
   ShareManifest, ShareStore, ShareSummary, VersionInfo, ViewLog,
 } from './types'
 
@@ -324,10 +324,11 @@ export class D1R2Store implements ShareStore, QueryStore {
   }
 
   async shares() {
-    const { results } = await this.db.prepare(`SELECT s.slug, s.owner, s.updated_at, v.file_count FROM shares s
+    const { results } = await this.db.prepare(`SELECT s.slug, s.owner, s.updated_at, s.public, v.file_count FROM shares s
       JOIN versions v ON v.share = s.slug AND v.version = s.current_version`)
-      .all<{ slug: string; owner: string; updated_at: number; file_count: number }>()
-    return new Map<string, ShareSummary>(results.map((r) => [r.slug, { n: r.file_count, t: r.updated_at, o: r.owner }]))
+      .all<{ slug: string; owner: string; updated_at: number; public: number; file_count: number }>()
+    return new Map<string, ShareSummary>(results.map((r) =>
+      [r.slug, { n: r.file_count, t: r.updated_at, o: r.owner, ...(r.public ? { pub: true } : {}) }]))
   }
 
   // Removes the share and (cascade) its versions, files, views and metadata,
@@ -366,6 +367,30 @@ export class D1R2Store implements ShareStore, QueryStore {
       SELECT ?1, ?2, 1, ?3 WHERE EXISTS (SELECT 1 FROM shares WHERE slug = ?1)
       ON CONFLICT (share, email) DO UPDATE SET n = n + 1, last_at = excluded.last_at
       WHERE excluded.last_at - views.last_at >= 1800000`).bind(slug, email, Date.now()).run()
+  }
+
+  // only a published share (current_version set) is public to readers
+  async isPublic(slug: string) {
+    const r = await this.db.prepare(
+      'SELECT 1 AS ok FROM shares WHERE slug = ? AND public = 1 AND current_version IS NOT NULL',
+    ).bind(slug).first<{ ok: number }>()
+    return !!r
+  }
+
+  async setPublic(slug: string, on: boolean, by: string) {
+    const [upd] = await this.db.batch([
+      this.db.prepare('UPDATE shares SET public = ? WHERE slug = ?').bind(on ? 1 : 0, slug),
+      this.db.prepare(`INSERT INTO audit (at, actor, action, share)
+        SELECT ?1, ?2, ?3, ?4 WHERE EXISTS (SELECT 1 FROM shares WHERE slug = ?4)`)
+        .bind(Date.now(), by, on ? 'public.on' : 'public.off', slug),
+    ])
+    if (!upd.meta.changes) throw new StoreError(404, 'not found')
+  }
+
+  async audit(limit: number) {
+    const { results } = await this.db.prepare('SELECT at, actor, action, share FROM audit ORDER BY id DESC LIMIT ?')
+      .bind(limit).all<AuditEntry>()
+    return results
   }
 
   // complete versions per publisher

@@ -36,7 +36,8 @@ export async function serve(url: URL, email: string | null, env: Env, store: Sha
       return `<td class="v" title="${esc(who)}">${n} viewer${n === 1 ? '' : 's'}</td>`
     }
     const rows = sorted.map(([p, s]) =>
-      `<tr data-p="/${esc(p)}/"><td class="s"><a href="${content}/${esc(p)}/">${esc(p)}</a></td>${
+      `<tr data-p="/${esc(p)}/"><td class="s"><a href="${content}/${esc(p)}/">${esc(p)}</a>${
+        s.pub ? ' <span class="pub" title="opens without login">public</span>' : ''}</td>${
         admin ? `<td class="o">${esc((s.o || env.ADMIN_EMAIL).split('@')[0])}</td>` : ''
       }<td class="n">${s.n} file${
         s.n === 1 ? '' : 's'}</td>${viewCell(p)}<td class="t" title="${
@@ -55,6 +56,8 @@ export async function serve(url: URL, email: string | null, env: Env, store: Sha
   .lst td.s a{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:.85rem;
     text-decoration:none}
   .lst td.s a:hover{text-decoration:underline}
+  .lst .pub{font-size:.7rem;color:var(--acc2);border:1px solid var(--acc2);border-radius:5px;
+    padding:0 .35em}
   .lst td.o{color:var(--muted)}
   .lst td.n{color:var(--acc1);text-align:right}
   .lst td.v{color:var(--muted);text-align:right;cursor:default}

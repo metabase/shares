@@ -90,6 +90,37 @@ async function dispatch(req: Request, url: URL, env: Env, store: ShareStore, who
     return new Response('not found\n', { status: 404 })
   }
 
+  // POST /_public/<slug>, body "on" or "off" (SHR-9). Only the owner makes
+  // a share public; the owner or admin makes it private again. "on" is
+  // refused while PUBLIC_SHARING is off. Each change is audit logged.
+  if (key.startsWith('_public/') && req.method === 'POST') {
+    const top = key.slice('_public/'.length).replace(/\/$/, '')
+    if (!top || top.startsWith('_') || top.includes('/')) return new Response('bad slug\n', { status: 400 })
+    const v = (await req.text()).trim()
+    if (v !== 'on' && v !== 'off') return new Response('body must be on or off\n', { status: 400 })
+    if (!store.setPublic) return new Response('not supported\n', { status: 501 })
+    if (v === 'on' && env.PUBLIC_SHARING !== '1') {
+      return new Response('public sharing is disabled\n', { status: 403 })
+    }
+    const owner = await store.owner(top)
+    if (!owner) return new Response('not found\n', { status: 404 })
+    if (owner !== who && !(admin && v === 'off')) {
+      return new Response(`owned by ${owner}\n`, { status: 403 })
+    }
+    await store.setPublic(top, v === 'on', who)
+    return new Response(`${v}\n`)
+  }
+
+  // GET /_audit (admin): newest audit rows, tab-separated ISO time, actor,
+  // action, share
+  if (key === '_audit' && req.method === 'GET') {
+    if (!admin) return new Response('forbidden', { status: 403 })
+    if (!store.audit) return new Response('not supported\n', { status: 501 })
+    const n = Math.min(1000, Math.max(1, Number(url.searchParams.get('limit')) || 100))
+    return lines((await store.audit(n)).map((a) =>
+      `${new Date(a.at).toISOString()}\t${a.actor}\t${a.action}\t${a.share ?? ''}`))
+  }
+
   // POST /_finalize/<slug>, body = newline-separated relative paths the CLI
   // just uploaded: writes the manifest without any list(). Owner-gated like
   // other writes; worst case an owner mis-lists their own share.
@@ -111,7 +142,7 @@ async function dispatch(req: Request, url: URL, env: Env, store: ShareStore, who
   }
 
   // _-prefixed top segments are reserved (store bookkeeping and the
-  // _list/_token/_stats/_cli/_peek/_zip/_views routes). Reads AND writes: a
+  // _list/_token/_stats/_cli/_peek/_zip/_views/_public/_audit routes). Reads AND writes: a
   // PUT to /_own/<slug> could hijack ownership on the KV store, a GET/list
   // under _own/ would enumerate every slug (share URLs are meant to be
   // unguessable).

@@ -58,6 +58,12 @@ export interface ApiEndpoints {
   // 400 with error authorization_pending (poll again), access_denied or
   // expired_token (start again); 200 with the token
   'POST /_device/token': { body: { device_code: string }; response: DeviceTokenResponse }
+  // make a share public (readable without login) or private. "on": owner
+  // only, 403 "public sharing is disabled" when the server flag is off.
+  // "off": owner or admin. 404 when the slug does not exist; 501 on KV.
+  'POST /_public/<slug>': { body: 'on' | 'off'; response: 'on\n' | 'off\n' }
+  // admin: newest audit rows (?limit=1..1000, default 100)
+  'GET /_audit': { query: { limit?: number }; response: Lines<AuditLine> }
 
   // JSON query API (D1+R2 store; 501 on KV). Bodies and responses are JSON;
   // errors are ApiError with the status. Collection slugs can contain "/"
@@ -203,6 +209,22 @@ export interface ViewLine {
   email: string
   count: number
   last: string
+}
+
+// one line of GET /_audit: tab-separated ISO time, actor email, action
+// (public.on, public.off), share slug
+export interface AuditLine {
+  at: string
+  actor: string
+  action: string
+  share: string
+}
+
+export function parseAudit(body: string): AuditLine[] {
+  return parseLines(body).map((l) => {
+    const [at, actor, action, share] = l.split('\t')
+    return { at, actor, action, share }
+  })
 }
 
 export function parseLines(body: string): string[] {
