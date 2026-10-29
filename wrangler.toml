@@ -59,15 +59,15 @@ ADMIN_EMAIL = "bryan.maass@gmail.com"
 #   bun x wrangler deploy --env metabase
 # shares.metabase.fyi holds share content only; app.shares.metabase.fyi holds the API,
 # login, tokens and UI (lll decision two-hosts-on-metabase-fyi).
-# main is a hello-world until the TS worker is ready to deploy here: it reads the
-# SHARES KV binding until SHR-4 moves storeFor(env) to R2+D1.
+# The TS worker with the D1+R2 store; no SHARES KV here. wrangler does not inherit
+# top-level vars or bindings: a var the worker reads must also be in this env.
 # secrets: bun x wrangler secret put <NAME> --env metabase
 #   SESSION_SECRET        -- random, signs session cookies
 #   GOOGLE_CLIENT_SECRET  -- from the Internal OAuth client (SHR-3)
 [env.metabase]
 name = "shares"
 account_id = "4f68a0299231e43ec1c7f75c50d21cb6"
-main = "deploy/hello.js"
+main = "src/index.ts"
 workers_dev = false
 routes = [
   { pattern = "shares.metabase.fyi", custom_domain = true },
@@ -90,4 +90,6 @@ GOOGLE_CLIENT_ID = "22970549836-hbrr8eiinejkmr5b68lst9mc6vd341no.apps.googleuser
 ALLOWED_DOMAIN = "metabase.com"
 CONTENT_HOST = "shares.metabase.fyi"
 APP_HOST = "app.shares.metabase.fyi"
+# admin: /_import, /_stats, /_audit, service tokens (A135)
+ADMIN_EMAIL = "tyler@metabase.com"
 # PUBLIC_SHARING is off here; set PUBLIC_SHARING = "1" to allow public shares
