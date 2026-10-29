@@ -26,6 +26,10 @@ export interface AuditEntry {
   share: string | null
 }
 
+import type { Collection, CollectionUpdate, ShareAttrs, ShareInfo, ShareManifest, VersionInfo } from '../api-types'
+
+export type { Collection, CollectionUpdate, ShareAttrs, ShareInfo, ShareManifest, VersionInfo }
+
 // one file of a versioned publish (POST /_publish/<slug>)
 export interface CommitFile {
   path: string // relative to the share
@@ -55,8 +59,9 @@ export interface ShareStore {
   // heal (default true): rebuild a missing manifest from the stored files.
   // heal false is a cheap existence check for redirects.
   manifest(slug: string, opts?: { heal?: boolean }): Promise<Manifest | null>
-  // record the files of a publish, written after the uploads by `by`
-  finalize(slug: string, files: string[], owner: string, by: string): Promise<Manifest>
+  // record the files of a publish, written after the uploads by `by`.
+  // attrs: QueryStore only, the caller refuses them on other stores.
+  finalize(slug: string, files: string[], owner: string, by: string, attrs?: ShareAttrs): Promise<Manifest>
   // full paths of the files under a prefix, from the slug's manifest
   filesUnder(prefix: string): Promise<string[]>
   // every share, by slug
@@ -79,11 +84,39 @@ export interface ShareStore {
   missingBlobs?(shas: string[]): Promise<string[]>
   putBlob?(sha: string, body: ArrayBuffer): Promise<void>
   // returns the new version number
-  commit?(slug: string, files: CommitFile[], by: string, message?: string): Promise<number>
+  commit?(slug: string, files: CommitFile[], by: string, message?: string, attrs?: ShareAttrs): Promise<number>
 
   // Public shares (SHR-9), D1+R2 only. isPublic is false on the KV adapter.
   isPublic(slug: string): Promise<boolean>
   // set the public bit and add an audit row, in one batch
   setPublic?(slug: string, on: boolean, by: string): Promise<void>
   audit?(limit: number): Promise<AuditEntry[]>
+}
+
+// filters of queryShares; all given ones must match
+export interface ShareFilter {
+  collection?: string
+  owner?: string
+  meta?: Record<string, string> // key -> JSON value or its string form
+  limit: number
+  before?: number
+}
+
+// Collections, share attributes and JSON reads (SHR-12). D1+R2 only.
+export interface QueryStore {
+  collections(prefix?: string): Promise<Collection[]>
+  collection(slug: string): Promise<Collection | null>
+  putCollection(slug: string, update: CollectionUpdate, by: string): Promise<Collection>
+  // attributes of a share without a publish
+  setAttrs(slug: string, attrs: ShareAttrs, by: string): Promise<void>
+  queryShares(filter: ShareFilter): Promise<ShareInfo[]>
+  // null when the share has no live version
+  share(slug: string): Promise<ShareInfo | null>
+  versions(slug: string): Promise<VersionInfo[]>
+  // live version when version is undefined; null when there is none
+  shareManifest(slug: string, version?: number): Promise<ShareManifest | null>
+}
+
+export function isQueryStore(s: ShareStore): s is ShareStore & QueryStore {
+  return 'queryShares' in s
 }
