@@ -52,10 +52,13 @@ PUBLIC = "1"
 ADMIN_EMAIL = "bryan.maass@gmail.com"
 
 # metabase: the Metabase Cloudflare account, zone metabase.fyi (SHR-2).
+# CI (.github/workflows/ci.yml) deploys it on each push to main, after tests:
+#   bun x wrangler d1 migrations apply shares --env metabase --remote
 #   bun x wrangler deploy --env metabase
 # shares.metabase.fyi holds share content only; app.shares.metabase.fyi holds the API,
 # login, tokens and UI (lll decision two-hosts-on-metabase-fyi).
-# main is a hello-world until the TS worker is ready to deploy here.
+# main is a hello-world until the TS worker is ready to deploy here: it reads the
+# SHARES KV binding until SHR-4 moves storeFor(env) to R2+D1.
 # secrets: bun x wrangler secret put <NAME> --env metabase
 #   SESSION_SECRET        -- random, signs session cookies
 #   GOOGLE_CLIENT_SECRET  -- from the Internal OAuth client (SHR-3)

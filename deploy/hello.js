@@ -1,5 +1,5 @@
 // Placeholder for the first deploy to the Metabase account (SHR-2).
-// It shows that the custom domains and the bindings work. CI (SHR-8) deploys src/ in its place.
+// It shows that the custom domains and the bindings work. CI deploys this file until [env.metabase] main points at src/index.ts.
 export default {
   async fetch(request, env) {
     const host = new URL(request.url).host;
