@@ -4,6 +4,7 @@ import {
   authenticate, setCookie, signEmail, ticketTag, verifyEmail,
 } from './auth'
 import { cli } from './api/cli'
+import { serviceApi } from './api/service'
 import { tokensApi } from './api/tokens'
 import CLI_SH from '../bin/share' // text module (wrangler.toml rules)
 import SKILL_MD from '../skill/SKILL.md'
@@ -31,6 +32,7 @@ const bearerOf = (req: Request) => (req.headers.get('authorization') || '').repl
 async function api(req: Request, url: URL, env: Env, store: ShareStore) {
   const who = await authenticate(env, bearerOf(req))
   if (!who) return new Response('unauthorized\n', { status: 401, headers: { 'www-authenticate': 'Bearer' } })
+  if (who.kind === 'service') return serviceApi(req, url, env, store, who)
   return await tokensApi(req, url, env, who) ?? cli(req, url, env, store, who.email)
 }
 
