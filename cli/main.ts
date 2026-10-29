@@ -391,7 +391,8 @@ async function publish(ctx: Ctx, args: string[]) {
     // glob form (`share dir/*`): the second arg is an existing path too
     const multi = args.length > 1 && existsSync(localPath(args[1], io.cwd))
     const srcs = multi ? args.map((s) => localPath(s, io.cwd)) : [src]
-    let name = (multi ? basename(dirname(src)) : args[1] ?? defaultName(src)).replace(/ /g, '-')
+    // -e takes the slug or a pasted share URL
+    let name = (multi ? basename(dirname(src)) : args[1] !== undefined ? deslug(args[1]) : defaultName(src)).replace(/ /g, '-')
     const files = collect(srcs)
     if (!files.length) throw new Error(`no files found under ${src} -- nothing uploaded`)
 

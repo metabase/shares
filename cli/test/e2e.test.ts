@@ -1,6 +1,9 @@
 // The CLI against `wrangler dev` (local D1 + R2, combined host). Runs the
 // source with bun, or the binary in SHARE_BIN. SHARE_DIST (a dir with the
-// release files of cli/build.ts) adds the install.sh test.
+// release files of cli/build.ts) adds the install.sh test. E2E_HOST: the
+// host name the CLI uses for the worker (host.docker.internal when
+// SHARE_BIN runs a Linux binary in a container); the test itself uses
+// localhost.
 
 import { spawn, spawnSync, type ChildProcess } from 'node:child_process'
 import { createHmac } from 'node:crypto'
@@ -11,7 +14,10 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 
 const ROOT = join(import.meta.dirname, '../..')
 const PORT = 20000 + Math.floor(Math.random() * 20000)
-const BASE = `http://localhost:${PORT}`
+const BASE = `http://${process.env.E2E_HOST || 'localhost'}:${PORT}`
+const LOCAL = `http://localhost:${PORT}`
+// a URL that the CLI printed, as the test reaches it
+const local = (u: string) => u.replace(BASE, LOCAL)
 const SECRET = 'e2e-session-secret'
 const ADMIN_TOKEN = 'e2e-upload-token'
 const USER = 'e2e-user@metabase.com'
@@ -51,9 +57,9 @@ function session(email: string) {
 }
 
 async function approve(code: string) {
-  const res = await fetch(`${BASE}/_device`, {
+  const res = await fetch(`${LOCAL}/_device`, {
     method: 'POST',
-    headers: { cookie: session(USER), origin: BASE, 'content-type': 'application/x-www-form-urlencoded' },
+    headers: { cookie: session(USER), origin: LOCAL, 'content-type': 'application/x-www-form-urlencoded' },
     body: new URLSearchParams({ code, action: 'approve' }),
   })
   expect(res.status).toBe(200)
@@ -66,12 +72,12 @@ beforeAll(async () => {
     cwd: ROOT, env: { ...process.env, CI: '1' }, encoding: 'utf8',
   })
   if (m.status !== 0) throw new Error(`migrations: ${m.stderr}`)
-  worker = spawn(wr, ['dev', '--port', String(PORT), '--ip', '127.0.0.1', '--persist-to', state,
+  worker = spawn(wr, ['dev', '--port', String(PORT), '--ip', process.env.E2E_HOST ? '0.0.0.0' : '127.0.0.1', '--persist-to', state,
     '--var', `SESSION_SECRET:${SECRET}`, '--var', `UPLOAD_TOKEN:${ADMIN_TOKEN}`, '--var', 'PUBLIC_SHARING:1'], {
     cwd: ROOT, env: { ...process.env, CI: '1' }, stdio: 'ignore',
   })
   for (let i = 0; i < 200; i++) {
-    try { if ((await fetch(`${BASE}/_skill`)).ok) return } catch { /* not up yet */ }
+    try { if ((await fetch(`${LOCAL}/_skill`)).ok) return } catch { /* not up yet */ }
     await new Promise((r) => setTimeout(r, 250))
   }
   throw new Error('wrangler dev did not start')
@@ -105,7 +111,7 @@ describe('share CLI against wrangler dev', () => {
     expect(r.code).toBe(0)
     const url = r.stdout.trim()
     expect(url).toMatch(new RegExp(`^${BASE}/x-[0-9a-f]{6}/$`))
-    const page = await fetch(url, { headers: { cookie: session(USER), accept: 'text/html' } })
+    const page = await fetch(local(url), { headers: { cookie: session(USER), accept: 'text/html' } })
     expect(page.status).toBe(200)
     expect(await page.text()).toContain('hello e2e')
   })
@@ -119,7 +125,7 @@ describe('share CLI against wrangler dev', () => {
     expect(first.slug).toMatch(/^my-site-[0-9a-f]{6}$/)
 
     writeFileSync(join(dir, 'site/index.html'), '<h1>v2</h1>')
-    const second = JSON.parse((await share(['-e', '--json', 'site', first.slug])).stdout)
+    const second = JSON.parse((await share(['-e', '--json', 'site', first.url])).stdout)
     expect(second).toMatchObject({ slug: first.slug, version: 2, url: first.url })
 
     const log = JSON.parse((await share(['log', first.url, '--json'])).stdout)
@@ -155,10 +161,10 @@ describe('share CLI against wrangler dev', () => {
     expect(p.public).toBe(true)
     const info = JSON.parse((await share(['api', `shares/${p.slug}`])).stdout)
     expect(info).toMatchObject({ collection: 'e2e/run-1', title: 'Run 1', meta: { pr: '7' } })
-    expect(await (await fetch(`${BASE}/${p.slug}/`)).text()).toContain('hello e2e')
+    expect(await (await fetch(`${LOCAL}/${p.slug}/`)).text()).toContain('hello e2e')
 
     expect(JSON.parse((await share(['--json'])).stdout)).toContain(p.slug)
-    await fetch(p.url, { headers: { cookie: session(USER), accept: 'text/html' } })
+    await fetch(local(p.url), { headers: { cookie: session(USER), accept: 'text/html' } })
     const views = JSON.parse((await share(['views', p.slug, '--json'])).stdout)
     expect(views[0]).toMatchObject({ email: USER, count: 1 })
 
@@ -192,14 +198,14 @@ describe('share CLI against wrangler dev', () => {
   })
 
   it.runIf(process.env.SHARE_DIST)('installs the binary with install.sh and logs in with it', async () => {
-    const script = await (await fetch(`${BASE}/_install.sh`)).text()
-    expect(script).toContain(`APP_URL="${BASE}"`)
+    const script = await (await fetch(`${LOCAL}/_install.sh`)).text()
+    expect(script).toContain(`APP_URL="${LOCAL}"`)
     const bin = join(dir, 'bin')
     const r = spawnSync('sh', ['-c', script], {
       env: { PATH: `${bin}:/usr/bin:/bin:/usr/sbin`, HOME, SHARE_INSTALL_DIR: bin, SHARE_RELEASE_URL: `file://${process.env.SHARE_DIST}` },
       encoding: 'utf8',
     })
-    expect(r.stderr).toContain(`next: share login ${BASE}`)
+    expect(r.stderr).toContain(`next: share login ${LOCAL}`)
     expect(r.status).toBe(0)
     const v = spawnSync(join(bin, 'share'), ['--version'], { encoding: 'utf8' })
     expect(v.stdout).toMatch(/^share \d/)
