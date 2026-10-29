@@ -20,7 +20,7 @@ let topsCache: { at: number; v: Map<string, ShareSummary> | null } = { at: 0, v:
 export class KvStore implements ShareStore {
   constructor(private env: Env) {}
 
-  private get kv() { return this.env.SHARES }
+  private get kv() { return this.env.SHARES! }
 
   private async allEntries<M>(prefix?: string) {
     const out: KVNamespaceListKey<M>[] = []
