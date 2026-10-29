@@ -296,7 +296,7 @@ export class D1R2Store implements ShareStore, QueryStore {
 
   // One version from a manifest of uploaded blobs, in one D1 batch. Sizes
   // come from R2, not from the client.
-  async commit(slug: string, files: CommitFile[], by: string, message?: string, attrs?: ShareAttrs) {
+  async commit(slug: string, files: CommitFile[], by: string, message?: string, attrs?: ShareAttrs, owner = by) {
     if (!files.length) throw new StoreError(400, 'empty manifest')
     if (attrs) checkAttrs(attrs)
     const paths = new Set<string>()
@@ -322,8 +322,9 @@ export class D1R2Store implements ShareStore, QueryStore {
     try {
       const res = await this.db.batch([
         this.ensureUser(by),
+        this.ensureUser(owner),
         this.db.prepare('INSERT OR IGNORE INTO shares (slug, owner, created_at, updated_at) VALUES (?, ?, ?, ?)')
-          .bind(slug, by, now, now),
+          .bind(slug, owner, now, now),
         this.db.prepare(`INSERT INTO versions (share, version, state, created_by, created_at, file_count, total_bytes, message)
           SELECT ?1, coalesce(max(version), 0) + 1, 'complete', ?2, ?3, ?4, ?5, ?6 FROM versions WHERE share = ?1`)
           .bind(slug, by, now, rows.length, total, message ?? null),
@@ -334,10 +335,10 @@ export class D1R2Store implements ShareStore, QueryStore {
         this.db.prepare(`UPDATE shares SET current_version = ${NEW}, updated_at = ?2 WHERE slug = ?1`)
           .bind(slug, now),
         this.db.prepare(`SELECT ${NEW} AS version`).bind(slug),
-        ...this.attrStatements(slug, by, attrs, now),
+        ...this.attrStatements(slug, owner, attrs, now),
         ...this.reindex(slug),
       ])
-      return (res[5].results[0] as { version: number }).version
+      return (res[6].results[0] as { version: number }).version
     } catch (e) {
       if (/UNIQUE|PRIMARY KEY/i.test((e as Error).message)) throw new StoreError(409, 'concurrent publish, retry')
       throw e
