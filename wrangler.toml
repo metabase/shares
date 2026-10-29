@@ -27,8 +27,8 @@ binding = "BLOBS"
 bucket_name = "shares-blobs"
 
 [vars]
-# public OAuth client id -- set after creating the Google OAuth client
-GOOGLE_CLIENT_ID = "1089089243557-frsr7vf4s7pja4b3uq33naughhh0gk1m.apps.googleusercontent.com"
+# public id of the Internal OAuth client in the Metabase GCP org (SHR-3)
+GOOGLE_CLIENT_ID = "22970549836-hbrr8eiinejkmr5b68lst9mc6vd341no.apps.googleusercontent.com"
 ALLOWED_DOMAIN = "metabase.com"
 ADMIN_EMAIL = "bryan@metabase.com"
 # PUBLIC_SHARING = "1"  -- owners can mark a share public (`share --public`),
@@ -85,6 +85,8 @@ binding = "BLOBS"
 bucket_name = "shares-blobs"
 
 [env.metabase.vars]
+# public id of the Internal OAuth client in the Metabase GCP org (SHR-3)
+GOOGLE_CLIENT_ID = "22970549836-hbrr8eiinejkmr5b68lst9mc6vd341no.apps.googleusercontent.com"
 ALLOWED_DOMAIN = "metabase.com"
 CONTENT_HOST = "shares.metabase.fyi"
 APP_HOST = "app.shares.metabase.fyi"
