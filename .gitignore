@@ -3,4 +3,5 @@ node_modules/
 .playwright-cli/
 .impeccable/
 backfill-own.sh
+.dev.vars
 dist/

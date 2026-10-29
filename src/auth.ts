@@ -91,6 +91,31 @@ export function redirectToGoogle(url: URL, env: Env) {
   return Response.redirect(auth.toString(), 302)
 }
 
+export interface IdClaims {
+  aud?: unknown
+  iss?: unknown
+  exp?: unknown
+  email?: unknown
+  email_verified?: unknown
+  hd?: unknown
+}
+
+// The email of a Google id_token payload, or null when a claim fails. hd is
+// the Workspace domain of the account: a consumer Google account made with a
+// @metabase.com address has a verified @metabase.com email but no hd, so the
+// email check alone does not identify an org account.
+export function idTokenEmail(c: IdClaims, env: Env): string | null {
+  const domain = env.ALLOWED_DOMAIN.toLowerCase()
+  if (!env.GOOGLE_CLIENT_ID || c.aud !== env.GOOGLE_CLIENT_ID) return null
+  if (c.iss !== 'https://accounts.google.com' && c.iss !== 'accounts.google.com') return null
+  if (typeof c.exp !== 'number' || c.exp < Date.now() / 1000) return null
+  if (c.email_verified !== true) return null
+  if (typeof c.hd !== 'string' || c.hd.toLowerCase() !== domain) return null
+  if (typeof c.email !== 'string') return null
+  const email = c.email.toLowerCase()
+  return email.endsWith(`@${domain}`) ? email : null
+}
+
 export async function handleCallback(url: URL, env: Env, cookie: string = COOKIE.combined) {
   const code = url.searchParams.get('code')
   if (!code) return new Response('missing code', { status: 400 })
@@ -111,17 +136,13 @@ export async function handleCallback(url: URL, env: Env, cookie: string = COOKIE
 
   // The id_token comes straight from Google's token endpoint over TLS in the
   // same request, so decoding without signature verification is sound here.
-  const payload = JSON.parse(
-    atob(tok.id_token.split('.')[1].replace(/-/g, '+').replace(/_/g, '/')),
-  )
-  const ok =
-    payload.aud === env.GOOGLE_CLIENT_ID &&
-    (payload.iss === 'https://accounts.google.com' || payload.iss === 'accounts.google.com') &&
-    payload.email_verified &&
-    payload.email?.toLowerCase().endsWith(`@${env.ALLOWED_DOMAIN}`)
-  if (!ok) return new Response(`access limited to @${env.ALLOWED_DOMAIN} accounts`, { status: 403 })
+  let email: string | null = null
+  try {
+    email = idTokenEmail(JSON.parse(unb64(tok.id_token.split('.')[1])), env)
+  } catch {}
+  if (!email) return new Response(`access limited to @${env.ALLOWED_DOMAIN} accounts`, { status: 403 })
 
-  const session = await signEmail(env, payload.email.toLowerCase(), SESSION_DAYS * 86400)
+  const session = await signEmail(env, email, SESSION_DAYS * 86400)
 
   let dest = '/'
   try { dest = atob(url.searchParams.get('state') || '') || '/' } catch {}
