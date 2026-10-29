@@ -1,8 +1,6 @@
 // Bearer-token endpoints of the `share` CLI. Request and response shapes:
 // api-types.ts.
 
-import CLI_SH from '../../bin/share' // text module (wrangler.toml rules), served at /_cli
-import SKILL_MD from '../../skill/SKILL.md' // ditto, served at /_skill
 import type { Env } from '../env'
 import { StoreError } from '../store'
 import type { CommitFile, ShareStore } from '../store'
@@ -20,10 +18,6 @@ export async function cli(req: Request, url: URL, env: Env, store: ShareStore, w
 
 async function dispatch(req: Request, url: URL, env: Env, store: ShareStore, who: string): Promise<Response> {
   const admin = who === env.ADMIN_EMAIL
-
-  // the share script + Claude Code skill, for one-line installs from /_token
-  if (url.pathname === '/_cli') return new Response(CLI_SH)
-  if (url.pathname === '/_skill') return new Response(SKILL_MD)
 
   if (url.pathname === '/_list') {
     // ?prefix=slug/ lists every file in a share (any token -- download works
