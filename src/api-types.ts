@@ -33,8 +33,11 @@ export interface ApiEndpoints {
   // it for the caller.
   'PUT /<slug>/<path>': { body: ArrayBuffer; response: 'ok\n' }
   // after the uploads: newline-separated relative paths of the share; 400
-  // when one of them was not uploaded (the previous version stays live)
-  'POST /_finalize/<slug>': { body: Lines<string>; response: 'ok\n' }
+  // when one of them was not uploaded (the previous version stays live).
+  // The query sets the share's attributes in the same commit: `collection`,
+  // `title`, and `meta=<key>=<value>` (repeatable; the value is a JSON
+  // string).
+  'POST /_finalize/<slug>': { query: FinalizeQuery; body: Lines<string>; response: 'ok\n' }
   // raw bytes of one file
   'GET /<slug>/<path>': { response: ArrayBuffer }
   // who viewed the share (owner or admin)
@@ -55,6 +58,25 @@ export interface ApiEndpoints {
   // 400 with error authorization_pending (poll again), access_denied or
   // expired_token (start again); 200 with the token
   'POST /_device/token': { body: { device_code: string }; response: DeviceTokenResponse }
+
+  // JSON query API (D1+R2 store; 501 on KV). Bodies and responses are JSON;
+  // errors are ApiError with the status. Collection slugs can contain "/"
+  // (metareview/metabase-85416): the rest of the path is the slug.
+  // collections, newest activity first; ?prefix= matches the slug start
+  'GET /_api/collections': { query: { prefix?: string }; response: Collection[] }
+  'GET /_api/collections/<slug>': { response: Collection }
+  // create (owner = caller) or update (owner or admin)
+  'PUT /_api/collections/<slug>': { body: CollectionUpdate; response: Collection }
+  // shares with a live version, newest first. Without `collection`, a
+  // non-admin sees only their own shares.
+  'GET /_api/shares': { query: ShareQuery; response: ShareInfo[] }
+  'GET /_api/shares/<slug>': { response: ShareInfo }
+  // set attributes without a publish (owner or admin)
+  'POST /_api/shares/<slug>': { body: ShareAttrs; response: ShareInfo }
+  // every version, newest first, pending ones too
+  'GET /_api/shares/<slug>/versions': { response: VersionInfo[] }
+  // files of the live version, or of ?version=<n>
+  'GET /_api/shares/<slug>/manifest': { query: { version?: number }; response: ShareManifest }
 }
 
 export interface TokenInfo {
@@ -84,9 +106,87 @@ export type DeviceTokenResponse =
   | { error: 'authorization_pending' | 'access_denied' | 'expired_token' }
   | { token: string; email: string; name: string }
 
-export interface PublishRequest {
+export type JsonValue = string | number | boolean | null | JsonValue[] | { [k: string]: JsonValue }
+
+// Free-form share attributes. Omitted fields stay as they are. A null
+// collection or title clears it; a null meta value removes that key. A
+// collection that does not exist is made, owned by the caller. Anyone can
+// publish into any collection.
+export interface ShareAttrs {
+  title?: string | null
+  collection?: string | null
+  meta?: Record<string, JsonValue>
+}
+
+export interface PublishRequest extends ShareAttrs {
   files: { path: string; sha256: string; contentType?: string }[]
   message?: string
+}
+
+export interface FinalizeQuery {
+  collection?: string
+  title?: string
+  meta?: string[] // "<key>=<value>"
+}
+
+export interface ApiError {
+  error: string
+}
+
+export interface Collection {
+  slug: string
+  title: string | null
+  owner: string
+  meta: Record<string, JsonValue>
+  shares: number // shares with a live version
+  createdAt: number // ms since epoch
+  updatedAt: number // last change or publish into it
+}
+
+export interface CollectionUpdate {
+  title?: string | null
+  meta?: Record<string, JsonValue> // replaces the collection's meta
+}
+
+// query string of GET /_api/shares
+export interface ShareQuery {
+  collection?: string
+  owner?: string
+  // meta.<key>=<value>, repeatable, all must match. The value matches the
+  // JSON value or its string form: meta.pr=85416 matches 85416 and "85416".
+  [meta: `meta.${string}`]: string
+  limit?: number // default 100, at most 1000
+  before?: number // updatedAt of the last row of the previous page
+}
+
+export interface ShareInfo {
+  slug: string
+  title: string | null
+  owner: string
+  collection: string | null
+  meta: Record<string, JsonValue>
+  version: number // the live version
+  fileCount: number
+  totalBytes: number
+  createdAt: number
+  updatedAt: number
+}
+
+export interface VersionInfo {
+  version: number
+  state: 'pending' | 'complete'
+  live: boolean
+  createdBy: string
+  createdAt: number
+  fileCount: number
+  totalBytes: number
+  message: string | null
+}
+
+export interface ShareManifest {
+  slug: string
+  version: number
+  files: { path: string; sha256: string; size: number; contentType: string | null }[]
 }
 
 export interface PublishResponse {

@@ -35,6 +35,7 @@ usage: share <file-or-dir> [name]        publish (new slug w/ random suffix)
        share ls <url-or-slug>            list files in a share
        share --local <url-or-slug>[/file]  print the local path a share came from
        share views <url-or-slug>         who viewed a share (email, count, last)
+       share api <path>                  GET /_api/<path> as JSON (collections, shares, versions)
        share                             list all shares
 
 examples:
@@ -47,6 +48,10 @@ examples:
   share                            list your share slugs
   share cat https://…/report-a3f2b/   read a pasted share URL (agent-friendly)
   share rm cool-name-a3f2b         delete
+  share --collection metareview/pr-85416 --meta pr=85416 --title "Run 1" ./out
+                                   publish into a collection with metadata
+  share api 'shares?collection=metareview/pr-85416&meta.pr=85416'
+                                   list a collection's shares as JSON
 
 Viewers need a @metabase.com Google login; URLs are safe to paste anywhere.
 A single .md/.html file publishes as the share's index (remote name
@@ -72,6 +77,9 @@ EOF
     fi
     [ -e "$MIRROR_DIR/$arg" ] && { printf '%s\n' "$MIRROR_DIR/$arg"; exit 0; }
     echo "no local copy of '$top' (published from another machine?)" >&2; exit 1 ;;
+  api)
+    auth "$BASE_URL/_api/${2#/}"
+    exit 0 ;;
   views)
     slug="$(deslug "${2:?usage: share views <url-or-slug>}")"
     out="$(auth "$BASE_URL/$(enc "$slug")/_views")"
@@ -125,13 +133,22 @@ if [ $# -eq 0 ]; then
 fi
 
 EDIT=0 EXACT=0
+# share attributes, sent as the finalize query (meta values are strings)
+ATTRS=()
 while :; do
   case "${1:-}" in
     -e|--edit)  EDIT=1; shift ;;
     -x|--exact) EXACT=1; shift ;;
+    -c|--collection) ATTRS+=("collection=$(enc "${2:?usage: --collection <slug>}")"); shift 2 ;;
+    -t|--title) ATTRS+=("title=$(enc "${2:?usage: --title <text>}")"); shift 2 ;;
+    -m|--meta)
+      case "${2:-}" in ?*=*) ;; *) echo "usage: --meta key=value" >&2; exit 1 ;; esac
+      ATTRS+=("meta=$(enc "$2")"); shift 2 ;;
     *) break ;;
   esac
 done
+QUERY=""
+[ "${#ATTRS[@]}" -gt 0 ] && QUERY="?$(IFS='&'; echo "${ATTRS[*]}")"
 
 # stdin mode (gh-gist muscle memory): `pbpaste | share -f slides.html [name]`
 if [ "${1:-}" = "-f" ] || [ "${1:-}" = "--filename" ]; then
@@ -235,6 +252,6 @@ fi
 # slug would finalize to a manifest of zero files and 404 on view
 [ "${#MAN[@]}" -eq 0 ] && { echo "no files found under $SRC -- nothing uploaded" >&2; exit 1; }
 
-printf '%s\n' ${MAN[@]+"${MAN[@]}"} | auth -X POST --data-binary @- "$BASE_URL/_finalize/$(enc "$NAME")" > /dev/null
+printf '%s\n' ${MAN[@]+"${MAN[@]}"} | auth -X POST --data-binary @- "$BASE_URL/_finalize/$(enc "$NAME")$QUERY" > /dev/null
 
 echo "uploaded" >&2

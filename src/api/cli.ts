@@ -2,8 +2,26 @@
 // api-types.ts.
 
 import type { Env } from '../env'
-import { StoreError } from '../store'
-import type { CommitFile, ShareStore } from '../store'
+import { isQueryStore, StoreError } from '../store'
+import type { CommitFile, ShareAttrs, ShareStore } from '../store'
+import { jsonApi } from './json'
+
+// ?collection=C&title=T&meta=k=v...; meta values are JSON strings
+function finalizeAttrs(q: URLSearchParams): ShareAttrs | undefined {
+  const a: ShareAttrs = {}
+  if (q.has('collection')) a.collection = q.get('collection')
+  if (q.has('title')) a.title = q.get('title')
+  const meta = q.getAll('meta')
+  if (meta.length) {
+    a.meta = {}
+    for (const m of meta) {
+      const i = m.indexOf('=')
+      if (i < 1) throw new StoreError(400, `bad meta: ${m} (want key=value)`)
+      a.meta[m.slice(0, i)] = m.slice(i + 1)
+    }
+  }
+  return Object.keys(a).length ? a : undefined
+}
 
 const lines = (xs: string[]) => new Response(xs.join('\n') + (xs.length ? '\n' : ''))
 
@@ -40,6 +58,8 @@ async function dispatch(req: Request, url: URL, env: Env, store: ShareStore, who
   const key = decodeURIComponent(url.pathname.slice(1))
   if (!key) return new Response('missing key', { status: 400 })
 
+  if (key === '_api' || key.startsWith('_api/')) return jsonApi(req, url, key, env, store, who)
+
   // Versioned publish (D1+R2 store): upload the blobs the store lacks, then
   // commit one manifest. The previous version stays live until the commit.
   if (key.startsWith('_blobs/') || key.startsWith('_publish/')) {
@@ -60,10 +80,11 @@ async function dispatch(req: Request, url: URL, env: Env, store: ShareStore, who
       if (owner && owner !== who && !admin) {
         return new Response(`owned by ${owner}\n`, { status: 403 })
       }
-      let body: { files?: CommitFile[]; message?: string }
+      let body: { files?: CommitFile[]; message?: string } & ShareAttrs
       try { body = await req.json() } catch { return new Response('bad json\n', { status: 400 }) }
       if (!Array.isArray(body.files)) return new Response('files missing\n', { status: 400 })
-      const version = await store.commit(top, body.files, who, body.message)
+      const { title, collection, meta } = body
+      const version = await store.commit(top, body.files, who, body.message, { title, collection, meta })
       return Response.json({ slug: top, version })
     }
     return new Response('not found\n', { status: 404 })
@@ -81,7 +102,9 @@ async function dispatch(req: Request, url: URL, env: Env, store: ShareStore, who
     }
     const files = (await req.text()).split('\n').map((s) => s.trim()).filter(Boolean)
     if (!files.length) return new Response('empty manifest\n', { status: 400 })
-    await store.finalize(top, files, owner || who, who)
+    const attrs = finalizeAttrs(url.searchParams)
+    if (attrs && !isQueryStore(store)) return new Response('attributes not supported\n', { status: 501 })
+    await store.finalize(top, files, owner || who, who, attrs)
     // push counter for /_stats: one finalize = one push
     await store.countPush(who)
     return new Response('ok\n')
