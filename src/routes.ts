@@ -60,6 +60,13 @@ function recordView(ctx: ExecutionContext, store: ShareStore, key: string, email
 const keyOf = (url: URL) => decodeURIComponent(url.pathname.slice(1))
 const isPrivatePage = (key: string) => key === '' || key === '_token' || key === '_stats'
 
+// PUBLIC_SHARING: a share its owner marked public opens without login
+// (SHR-9). Only share paths: private pages and _-prefixed paths never.
+async function isPublicShare(env: Env, store: ShareStore, key: string) {
+  const top = key.split('/')[0]
+  return env.PUBLIC_SHARING === '1' && !!top && !top.startsWith('_') && store.isPublic(top)
+}
+
 // One origin for everything: hosts that match neither CONTENT_HOST nor
 // APP_HOST (workers.dev, wrangler dev, the pubshare deploy). Share HTML runs
 // on the origin that holds the session and the token page.
@@ -74,9 +81,9 @@ export async function handle(req: Request, env: Env, ctx: ExecutionContext): Pro
   // PUBLIC (pubshare deploy): anonymous read-only viewers, no login.
   // Writes still go through the bearer-token branch above.
   const email = env.PUBLIC ? null : await sessionEmail(req, env)
-  if (!email && !env.PUBLIC) return redirectToGoogle(url, env)
-
   const key = keyOf(url)
+  if (!email && !env.PUBLIC && !await isPublicShare(env, store, key)) return redirectToGoogle(url, env)
+
   const priv = isPrivatePage(key)
   if (priv && !isNavigation(req)) return forbidden()
 
@@ -103,9 +110,9 @@ export async function contentHost(req: Request, env: Env, ctx: ExecutionContext)
   const key = keyOf(url)
   if (isPrivatePage(key)) return Response.redirect(`${app}/${key}`, 302)
 
-  // PUBLIC: anonymous viewers. The per-share public bit is SHR-9.
+  // PUBLIC: anonymous viewers; PUBLIC_SHARING: anonymous viewers of public shares
   const email = env.PUBLIC ? null : await sessionEmail(req, env, COOKIE.content, CONTENT_TAG)
-  if (!email && !env.PUBLIC) {
+  if (!email && !env.PUBLIC && !await isPublicShare(env, store, key)) {
     return Response.redirect(`${app}/_login?to=${encodeURIComponent(url.pathname + url.search)}`, 302)
   }
 
