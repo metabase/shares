@@ -59,12 +59,30 @@ async function handle(req, env, ctx) {
     const email = env.PUBLIC ? null : await sessionEmail(req, env)
     if (!email && !env.PUBLIC) return redirectToGoogle(url, env)
 
+    // Share HTML runs on this origin with the viewer's cookie, so the pages
+    // that hold private data (the token page, the listing, stats) answer only
+    // top-level navigations: a share's fetch() or iframe gets a 403, and COOP
+    // cuts the window.open() handle. Browsers without Sec-Fetch-* pass.
+    const key = decodeURIComponent(url.pathname.slice(1))
+    const priv = key === '' || key === '_token' || key === '_stats'
+    if (priv) {
+      const mode = req.headers.get('sec-fetch-mode')
+      const dest = req.headers.get('sec-fetch-dest')
+      if ((mode && mode !== 'navigate') || (dest && dest !== 'document')) {
+        return new Response('forbidden\n', { status: 403 })
+      }
+    }
+
     const accept = req.headers.get('accept')
     const res = await serve(url, email, env, accept)
+    if (priv) {
+      res.headers.set('cross-origin-opener-policy', 'same-origin')
+      res.headers.set('content-security-policy', "frame-ancestors 'none'")
+      res.headers.set('x-frame-options', 'DENY')
+    }
 
     // views: count successful browser navigations to share content. Assets
     // and hover previews fetch() with accept */*; _peek/_zip carry a /_ path.
-    const key = decodeURIComponent(url.pathname.slice(1))
     if (email && res.status === 200 && key && !key.startsWith('_') && !key.includes('/_')
         && accept?.includes('text/html')) {
       ctx.waitUntil(recordView(env, key.split('/')[0], email))
@@ -277,9 +295,12 @@ async function cli(req, url, env, who) {
     return new Response('ok\n')
   }
 
-  // DELETE /name/ removes every object under the prefix, plus bookkeeping.
-  // Still a real list(): catches files a stale manifest doesn't know about.
-  const names = await allKeys(env, key)
+  // DELETE /name/ removes the whole share, plus bookkeeping. Always list
+  // under `${top}/`: the raw key without its slash ("a") would also match
+  // other people's shares that start with it ("alice-report-..."), and the
+  // owner check above only covers `top`. Still a real list(): catches files
+  // a stale manifest doesn't know about.
+  const names = await allKeys(env, `${top}/`)
   await Promise.all(names.map((n) => env.SHARES.delete(n)))
   await env.SHARES.delete(ownKey)
   await env.SHARES.delete(`_man/${top}`)
