@@ -50,18 +50,37 @@ export async function createToken(env: Env, owner: string, name: string) {
   return { id, token }
 }
 
-// The owner and id of a live user token, else null.
-export async function verifyToken(env: Env, token: string): Promise<{ email: string; id: string } | null> {
+// A live token, else null. A user token acts as its owner; a service token
+// acts as `agent:<name>` within its scopes (api/service.ts).
+export type TokenCaller =
+  | { kind: 'user'; email: string; id: string }
+  | ServiceCaller
+
+export interface ServiceCaller {
+  kind: 'service'
+  id: string
+  // agent:<name>: uploader of its versions and actor of its audit rows
+  agent: string
+  // owner of the shares it makes: on_behalf_of, else the agent
+  email: string
+  scopes: string[]
+}
+
+export async function verifyToken(env: Env, token: string): Promise<TokenCaller | null> {
   if (!env.DB || !isToken(token)) return null
-  const row = await env.DB.prepare(`SELECT id, owner, last_used_at, expires_at, revoked_at
-    FROM tokens WHERE hash = ? AND kind = 'user'`).bind(await sha256(token))
-    .first<{ id: string; owner: string; last_used_at: number | null; expires_at: number | null; revoked_at: number | null }>()
+  const row = await env.DB.prepare(`SELECT id, name, owner, kind, scopes, on_behalf_of, last_used_at, expires_at, revoked_at
+    FROM tokens WHERE hash = ?`).bind(await sha256(token)).first<{
+      id: string; name: string; owner: string; kind: 'user' | 'service'; scopes: string; on_behalf_of: string | null
+      last_used_at: number | null; expires_at: number | null; revoked_at: number | null
+    }>()
   const now = Date.now()
   if (!row || row.revoked_at || (row.expires_at && row.expires_at <= now)) return null
   if (!row.last_used_at || row.last_used_at < now - TOUCH_MS) {
     await env.DB.prepare('UPDATE tokens SET last_used_at = ? WHERE id = ?').bind(now, row.id).run()
   }
-  return { email: row.owner, id: row.id }
+  if (row.kind === 'user') return { kind: 'user', email: row.owner, id: row.id }
+  const agent = `agent:${row.name}`
+  return { kind: 'service', id: row.id, agent, email: row.on_behalf_of ?? agent, scopes: JSON.parse(row.scopes) }
 }
 
 export async function listTokens(env: Env, owner: string) {
@@ -75,6 +94,53 @@ export async function revokeToken(env: Env, owner: string, id: string) {
   const r = await env.DB.prepare(`UPDATE tokens SET revoked_at = ?
     WHERE id = ? AND owner = ? AND kind = 'user' AND revoked_at IS NULL`).bind(Date.now(), id, owner).run()
   if (r.meta.changes) await audit(env, owner, 'token.revoke', { id }).run()
+  return r.meta.changes > 0
+}
+
+// Service tokens (SHR-13): made by the admin for agents and CI. Scopes are
+// "read:<pattern>" or "write:<pattern>" over collection slugs; a trailing
+// "*" matches any rest (metareview/* matches metareview/run-1). Write
+// implies read. Name: the agent, [a-z0-9._-].
+export const SCOPE = /^(read|write):[a-z0-9][a-z0-9._/-]*\*?$|^(read|write):\*$/
+export const AGENT_NAME = /^[a-z0-9][a-z0-9._-]{0,63}$/
+
+export interface ServiceTokenRow extends TokenRow {
+  owner: string
+  scopes: string
+  on_behalf_of: string | null
+}
+
+export async function createServiceToken(env: Env, admin: string,
+  t: { name: string; scopes: string[]; on_behalf_of?: string | null; days?: number }) {
+  const id = hex(random(6))
+  const token = `shr_${id}_${hex(random(32))}`
+  const now = Date.now()
+  const scopes = JSON.stringify(t.scopes)
+  const users = [...new Set([admin, t.on_behalf_of].filter((e): e is string => !!e))]
+  await env.DB.batch([
+    ...users.map((e) => env.DB.prepare('INSERT OR IGNORE INTO users (email, created_at) VALUES (?, ?)').bind(e, now)),
+    env.DB.prepare(`INSERT INTO tokens (id, hash, name, owner, kind, scopes, on_behalf_of, created_at, expires_at)
+      VALUES (?, ?, ?, ?, 'service', ?, ?, ?, ?)`)
+      .bind(id, await sha256(token), t.name, admin, scopes, t.on_behalf_of ?? null, now,
+        now + (t.days ?? TOKEN_DAYS) * 86400_000),
+    audit(env, admin, 'token.create', {
+      id, name: t.name, kind: 'service', scopes, ...(t.on_behalf_of ? { on_behalf_of: t.on_behalf_of } : {}),
+    }),
+  ])
+  return { id, token }
+}
+
+export async function listServiceTokens(env: Env) {
+  const { results } = await env.DB.prepare(`SELECT id, name, owner, scopes, on_behalf_of, created_at, last_used_at,
+    expires_at, revoked_at FROM tokens WHERE kind = 'service' ORDER BY created_at DESC`).all<ServiceTokenRow>()
+  return results
+}
+
+// admin: true when a live service token was revoked
+export async function revokeServiceToken(env: Env, admin: string, id: string) {
+  const r = await env.DB.prepare(`UPDATE tokens SET revoked_at = ?
+    WHERE id = ? AND kind = 'service' AND revoked_at IS NULL`).bind(Date.now(), id).run()
+  if (r.meta.changes) await audit(env, admin, 'token.revoke', { id, kind: 'service' }).run()
   return r.meta.changes > 0
 }
 
