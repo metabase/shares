@@ -1,5 +1,5 @@
 name = "mb-shares"
-main = "src/index.js"
+main = "src/index.ts"
 compatibility_date = "2026-08-01"
 
 # bundle bin/share + skill/SKILL.md as text so the worker can serve them
@@ -12,6 +12,19 @@ fallthrough = true
 [[kv_namespaces]]
 binding = "SHARES"
 id = "8e746d88c3254e1b83b82eb02db9be0c"
+
+# R2 + D1 store (decision replatform-r2-d1). Placeholder ids: `wrangler dev`
+# runs both locally; SHR-2 sets the real ids of the Metabase account.
+# Local D1: bun x wrangler d1 migrations apply shares --local
+[[d1_databases]]
+binding = "DB"
+database_name = "shares"
+database_id = "00000000-0000-0000-0000-000000000000"
+migrations_dir = "migrations"
+
+[[r2_buckets]]
+binding = "BLOBS"
+bucket_name = "shares-blobs"
 
 [vars]
 # public OAuth client id -- set after creating the Google OAuth client

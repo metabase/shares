@@ -1,0 +1,54 @@
+// Storage behind the routes. The routes see share files and share metadata
+// only, never KV keys, so a second adapter (R2 blobs + D1 metadata, SHR-4)
+// can replace store/kv.ts without route changes.
+//
+// Paths: a share file is "<slug>/<relative path>". A prefix is "<slug>/" or
+// "<slug>/<subdir>/", always with the trailing slash.
+
+export interface Manifest {
+  files: string[] // relative paths, sorted
+  t: number // last finalize, ms since epoch
+  o: string // owner email
+}
+
+export interface ShareSummary {
+  n: number // file count
+  t: number // newest timestamp, 0 when unknown
+  o?: string // owner email; undefined on legacy shares (= ADMIN_EMAIL)
+}
+
+// email -> view count and last view (ms)
+export type ViewLog = Record<string, { n: number; last: number }>
+
+export interface ShareStore {
+  // file bodies, or null when the file does not exist
+  getText(path: string): Promise<string | null>
+  getBytes(path: string): Promise<ArrayBuffer | null>
+  getStream(path: string): Promise<ReadableStream | null>
+  putFile(path: string, body: ArrayBuffer, uploader: string): Promise<void>
+
+  // owner of a slug, or null when nobody has claimed it
+  owner(slug: string): Promise<string | null>
+  claim(slug: string, owner: string): Promise<void>
+
+  // heal (default true): rebuild a missing manifest from the stored files.
+  // heal false is a cheap existence check for redirects.
+  manifest(slug: string, opts?: { heal?: boolean }): Promise<Manifest | null>
+  // record the files of a publish, written after the uploads
+  finalize(slug: string, files: string[], owner: string): Promise<Manifest>
+  // full paths of the files under a prefix, from the slug's manifest
+  filesUnder(prefix: string): Promise<string[]>
+  // every share, by slug
+  shares(): Promise<Map<string, ShareSummary>>
+  // remove the share, its files and its bookkeeping; returns the file count
+  deleteShare(slug: string): Promise<number>
+  // rebuild every manifest and owner from the stored files; returns the
+  // share count
+  rebuildAll(): Promise<number>
+
+  views(slug: string): Promise<ViewLog | null>
+  recordView(slug: string, email: string): Promise<void>
+  // publish count per email
+  pushes(): Promise<Record<string, number>>
+  countPush(who: string): Promise<void>
+}
