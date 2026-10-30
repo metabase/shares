@@ -16,7 +16,7 @@ Old CLI tokens and session cookies do not move: users run `share login` on the n
 
 ## Preconditions
 
-- The TS worker serves `[env.metabase]` with `ADMIN_EMAIL` set: the import needs an admin token. `[env.metabase]` has no ADMIN_EMAIL var yet.
+- The TS worker serves `[env.metabase]` with `ADMIN_EMAIL` set: the import needs an admin token. `wrangler.toml` sets it to tyler@metabase.com.
 - An admin CLI token of the new host: `share login https://app.shares.metabase.fyi` as ADMIN_EMAIL, or a token from its `/_token` page.
 - A Cloudflare API token with "Workers KV Storage: Read" on Bryan's account (Bryan runs the export, or gives this token).
 - Bryan applies `deploy/mb-shares-cutover.patch` to escherize/mb-shares-worker (`git am`) and deploys it. With no var set it changes nothing.
