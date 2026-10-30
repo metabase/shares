@@ -23,7 +23,7 @@ arch="${SHARE_ARCH:-$(uname -m)}"
 case "$os" in
   Darwin|darwin) os=darwin ;;
   Linux|linux) os=linux ;;
-  *) die "no binary for OS $os (macOS and Linux only); npm i -g @metabase/shares works where Node 20+ does" ;;
+  *) die "no binary for OS $os (macOS and Linux only; on Windows, use WSL)" ;;
 esac
 case "$arch" in
   arm64|aarch64) arch=arm64 ;;
@@ -36,7 +36,7 @@ if [ -z "${SHARE_ARCH:-}" ] && [ "$os" = darwin ] && [ "$arch" = x64 ] \
   arch=arm64
 fi
 if [ "$os" = linux ] && [ -f /etc/alpine-release ]; then
-  die "no musl (Alpine) binary; npm i -g @metabase/shares works where Node 20+ does"
+  die "no musl (Alpine) binary; use a glibc distribution"
 fi
 name="share-$os-$arch"
 

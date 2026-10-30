@@ -17,7 +17,7 @@ share login                                                  # approve in the br
 share report.md                                              # prints the link
 ```
 
-Without a binary for the platform (Alpine, Windows): `npm i -g @metabase/shares` (Node 20+).
+Binaries are for macOS and Linux (glibc), arm64 and x64. On Windows, use WSL.
 `share -h` lists every command.
 
 The config is `~/.config/shares/config` (mode 0600, written by `share login`). `SHARES_URL`,
@@ -84,7 +84,7 @@ Layout:
 | `src/store/` | `ShareStore`; `d1r2.ts` is the versioned R2 + D1 store |
 | `src/web/`, `src/render/` | web app pages; file renderers (md, csv, json, code) |
 | `src/api-types.ts` | HTTP API types, shared with the CLI |
-| `cli/` | the TypeScript `share` CLI, `install.sh`, `build.ts` (bun binaries, npm package) |
+| `cli/` | the TypeScript `share` CLI, `install.sh`, `build.ts` (bun binaries) |
 | `bin/share` | the bash CLI of mb-shares, still served at `/_cli` |
 | `migrations/` | D1 schema |
 | `skill/SKILL.md` | the Claude Code skill |
@@ -96,8 +96,8 @@ applies D1 migrations and runs `wrangler deploy --env metabase` to the Metabase 
 account, through the GitHub environment `production`. Worker secrets:
 `bun x wrangler secret put <NAME> --env metabase` (`SESSION_SECRET`, `GOOGLE_CLIENT_SECRET`).
 
-A tag `cli-v<semver>` runs `.github/workflows/release.yml`: CLI binaries to a GitHub release,
-the npm package to `@metabase/shares`.
+A tag `cli-v<semver>` runs `.github/workflows/release.yml`: CLI binaries and `SHA256SUMS` to a
+GitHub release, which install.sh downloads.
 
 Public sharing (`share --public`) is off unless the var `PUBLIC_SHARING = "1"` is set.
 
