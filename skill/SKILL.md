@@ -25,8 +25,8 @@ share login                             # opens the browser; approve; token save
 
 `share login` prints a URL and a code. In an agent session, show both to the
 user and wait: the user approves in the browser, then the command saves the
-token to `~/.config/shares/config` (mode 0600) and exits. Without a binary for
-the platform: `npm i -g @metabase/shares` (Node 20+).
+token to `~/.config/shares/config` (mode 0600) and exits. Binaries are for
+macOS and Linux (glibc); on Windows, use WSL.
 
 Old mb-shares setup (`~/.config/mb-shares/env`, a token from `/_token` on
 mb-shares.escherize.workers.dev): run `share login` once. The new CLI

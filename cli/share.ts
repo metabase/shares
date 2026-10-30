@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// Entry point of the `share` binary (bun build --compile) and npm package.
+// Entry point of the `share` binary (bun build --compile).
 import { main } from './main'
 
 const chunks: Buffer[] = []
