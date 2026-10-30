@@ -7,7 +7,9 @@
     "typecheck": "tsc -p .",
     "test": "tsc -p . && tsc -p cli && vitest run && vitest run --config cli/vitest.config.ts",
     "cli:build": "bun cli/build.ts",
-    "db:migrate:local": "wrangler d1 migrations apply shares --local"
+    "db:migrate:local": "wrangler d1 migrations apply shares --local",
+    "dev:seed": "bun scripts/dev-seed.ts",
+    "dev:reset": "bun scripts/dev-reset.ts"
   },
   "dependencies": {
     "fflate": "^0.8.3",

@@ -53,12 +53,26 @@ the metareview contract.
 
 ```sh
 bun install
+cp .dev.vars.example .dev.vars    # local secrets; DEV_LOGIN=1 signs in without Google
 bun run db:migrate:local          # local D1
-bun run dev                       # wrangler dev: local D1 + R2, one host for content and app
-cp .dev.vars.example .dev.vars    # DEV_LOGIN=1: sign in without Google
-# open http://localhost:8787/_dev/login  (?email=someone@metabase.com to view as another user)
+bun run dev                       # wrangler dev on http://localhost:8787: local D1 + R2 + KV, one host for content and app
 bun run test                      # tsc (worker, cli) + worker tests + CLI unit and e2e tests
 ```
+
+Local data for UI work, with `bun run dev` running:
+
+1. `bun run dev:seed`: 34 shares of 4 owners (every renderer, versions, collections). Run it
+   again: unchanged shares are skipped.
+2. Open http://localhost:8787/_dev/login: you sign in as `ADMIN_EMAIL` (set it in `.dev.vars`
+   for the admin view). `/_dev/login?email=sam.chen@metabase.com` signs in as another user,
+   for the non-admin view. The session cookie is shared by every port on `localhost`: for a
+   second worker, use `127.0.0.1:<port>` or another browser profile.
+3. `bun run dev:reset`: stop `bun run dev` first (the reset refuses while a process holds the
+   state). It wipes the local state, applies the migrations and seeds it again, on its own
+   temporary worker. Then `bun run dev`.
+
+Local data is in `.wrangler/state/v3` (`d1/`, `r2/`, `kv/`). Inspect it with
+`bun x wrangler d1 execute shares --local --command "select slug, owner from shares"`.
 
 Layout:
 
