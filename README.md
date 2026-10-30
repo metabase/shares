@@ -55,6 +55,8 @@ the metareview contract.
 bun install
 bun run db:migrate:local          # local D1
 bun run dev                       # wrangler dev: local D1 + R2, one host for content and app
+cp .dev.vars.example .dev.vars    # DEV_LOGIN=1: sign in without Google
+# open http://localhost:8787/_dev/login  (?email=someone@metabase.com to view as another user)
 bun run test                      # tsc (worker, cli) + worker tests + CLI unit and e2e tests
 ```
 

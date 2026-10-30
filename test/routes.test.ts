@@ -1,4 +1,6 @@
 import { describe, expect, it } from 'vitest'
+import { env } from 'cloudflare:workers'
+import { devLogin } from '../src/auth'
 import { ADMIN, api, browse, fetchWorker, publish, slug, userToken } from './helpers'
 
 describe('auth', () => {
@@ -9,6 +11,34 @@ describe('auth', () => {
     expect(loc.host).toBe('accounts.google.com')
     expect(loc.searchParams.get('redirect_uri')).toBe('https://shares.test/auth/callback')
     expect(atob(loc.searchParams.get('state')!)).toBe('/some-share/')
+  })
+
+  it('sends /_dev/login to Google login when DEV_LOGIN is not set', async () => {
+    const r = await fetchWorker('/_dev/login', {}, 'http://localhost:8787')
+    expect(r.status).toBe(302)
+    expect(new URL(r.headers.get('location')!).host).toBe('accounts.google.com')
+  })
+
+  it('dev login sets a session cookie the worker accepts, on loopback hosts only', async () => {
+    const dev = { ...env, DEV_LOGIN: '1' }
+    const get = (u: string) => devLogin(new Request(u), new URL(u), dev)
+
+    const r = (await get('http://localhost:8787/_dev/login?email=Someone@metabase.com&next=/_collections'))!
+    expect(r.status).toBe(302)
+    expect(r.headers.get('location')).toBe('/_collections')
+    const cookie = r.headers.get('set-cookie')!.split(';')[0]
+    const home = await fetchWorker('/', {
+      headers: { cookie, accept: 'text/html', 'sec-fetch-mode': 'navigate' },
+    }, 'http://localhost:8787')
+    expect(home.status).toBe(200)
+    expect(await home.text()).toContain('someone@metabase.com')
+
+    expect((await get('http://127.0.0.1:8787/_dev/login'))!.status).toBe(302)
+    expect((await get('http://localhost/_dev/login?next=//evil.example'))!.headers.get('location')).toBe('/')
+    expect((await get('http://localhost/_dev/login?email=x@gmail.com'))!.status).toBe(400)
+    expect(await get('https://shares.test/_dev/login')).toBeNull()
+    expect(await get('https://app.shares.test/_dev/login')).toBeNull()
+    expect(await devLogin(new Request('http://localhost/_dev/login'), new URL('http://localhost/_dev/login'), env)).toBeNull()
   })
 
   it('refuses writes without a valid token with 401', async () => {
