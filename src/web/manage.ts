@@ -1,4 +1,4 @@
-// Web app pages to find and manage shares (SHR-15), on the app host (or
+// Web app pages to find and manage shares, on the app host (or
 // the combined host): the share page /_s/<slug> (attributes, views,
 // versions, files of a version, diffs, and the rename, transfer, delete
 // and title forms) and the collections page /_collections. D1+R2 store

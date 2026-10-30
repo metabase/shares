@@ -105,7 +105,7 @@ async function dispatch(req: Request, url: URL, env: Env, store: ShareStore, who
   }
 
   // POST /_import/<slug> (admin): one share of the mb-shares KV export
-  // (SHR-10, scripts/kv-import.ts). The slug is kept as it was.
+  // (scripts/kv-import.ts). The slug is kept as it was.
   if (key.startsWith('_import/') && req.method === 'POST') {
     if (!admin) return new Response('forbidden', { status: 403 })
     if (!store.importShare) return new Response('not supported\n', { status: 501 })
@@ -116,7 +116,7 @@ async function dispatch(req: Request, url: URL, env: Env, store: ShareStore, who
     return Response.json(await store.importShare(top, body, who))
   }
 
-  // POST /_public/<slug>, body "on" or "off" (SHR-9). Only the owner makes
+  // POST /_public/<slug>, body "on" or "off". Only the owner makes
   // a share public; the owner or admin makes it private again. "on" is
   // refused while PUBLIC_SHARING is off. Each change is audit logged.
   if (key.startsWith('_public/') && req.method === 'POST') {

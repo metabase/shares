@@ -97,7 +97,7 @@ export async function revokeToken(env: Env, owner: string, id: string) {
   return r.meta.changes > 0
 }
 
-// Service tokens (SHR-13): made by the admin for agents and CI. Scopes are
+// Service tokens: made by the admin for agents and CI. Scopes are
 // "read:<pattern>" or "write:<pattern>" over collection slugs; a trailing
 // "*" matches any rest (metareview/* matches metareview/run-1). Write
 // implies read. Name: the agent, [a-z0-9._-].

@@ -326,8 +326,7 @@ async function run(ctx: Ctx, cmd: string, a: string[]) {
   }
 }
 
-// CLI tokens: your own, or (admin, --service) service tokens (decision
-// service-tokens-scopes)
+// CLI tokens: your own, or (admin, --service) service tokens
 async function token(ctx: Ctx, a: string[]) {
   const usage = 'share token ls|create|revoke (share -h)'
   const kind = ctx.opts.service ? '?kind=service' : ''
@@ -471,7 +470,7 @@ async function legacyUpload(api: Client, slug: string, blobs: (LocalFile & { dat
   return null
 }
 
-// device flow (decision cli-tokens-device-flow): the app host shows a code,
+// device flow: the app host shows a code,
 // a signed-in user approves it, this polls until the token comes
 async function login(ctx: Ctx, arg?: string) {
   const base = (arg || ctx.io.env.SHARES_URL || ctx.cfg.baseUrl || DEFAULT_APP).replace(/\/+$/, '')

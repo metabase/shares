@@ -5,7 +5,7 @@ generic: shares holds the run folder and metadata, not a findings model.
 
 ## Token
 
-The admin makes one service token (SHR-13):
+The admin makes one service token:
 
 ```sh
 curl -X POST https://app.shares.metabase.fyi/_api/tokens -H "authorization: Bearer $ADMIN_TOKEN" \

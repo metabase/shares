@@ -154,7 +154,7 @@ line whether this doc is for them. Put it as a blockquote under the title:
 # <title>
 
 > **Question this answers:** <the single concrete question, with the specifics
-> baked in — the branch, the commit, the dataset, the decision at stake — not a
+> baked in — the branch, the commit, the dataset, the choice at stake — not a
 > vague topic>.
 ```
 

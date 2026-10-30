@@ -90,7 +90,7 @@ function status(t: TokenRow) {
   return `expires ${new Date(t.expires_at!).toISOString().slice(0, 10)}`
 }
 
-// The admin's service tokens section of /_token (SHR-13 tokens, SHR-15 UI):
+// The admin's service tokens section of /_token:
 // list, revoke, and a create form with the fields of POST /_api/tokens.
 async function serviceSection(env: Env) {
   const rows = (await listServiceTokens(env)).map((t) => {

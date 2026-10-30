@@ -1,4 +1,4 @@
-// Bearer endpoints for service tokens (SHR-13): agents and CI. Deny by
+// Bearer endpoints for service tokens: agents and CI. Deny by
 // default: a service token reaches only the routes below, and only for
 // collections that its scopes match. A share is in scope when its
 // collection is; a share without a collection never is. Shapes:

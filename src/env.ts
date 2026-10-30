@@ -13,10 +13,10 @@ export interface Env {
   ADMIN_EMAIL: string
   // "1": public read-only deploy (env.pub), no Google login
   PUBLIC?: string
-  // "1": owners can mark a share public, readable without login (SHR-9,
-  // decision public-sharing-flag). Unset: off, the API refuses the flag.
+  // "1": owners can mark a share public, readable without login.
+  // Unset: off, the API refuses the flag.
   PUBLIC_SHARING?: string
-  // hostnames of the two hosts (SHR-5). When a request host matches neither,
+  // hostnames of the two hosts. When a request host matches neither,
   // one origin serves everything.
   CONTENT_HOST?: string
   APP_HOST?: string

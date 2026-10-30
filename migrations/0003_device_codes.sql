@@ -1,4 +1,4 @@
--- `share login` device flow (SHR-6). The CLI holds the device code and
+-- `share login` device flow. The CLI holds the device code and
 -- polls with it; the person types or opens the user code on the app host.
 -- A row lives until the CLI picks up its token or it expires (10 min).
 CREATE TABLE device_codes (

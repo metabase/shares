@@ -1,4 +1,4 @@
-// One Worker, two hosts (decision two-hosts-on-metabase-fyi): the content
+// One Worker, two hosts: the content
 // host serves share files only, the app host serves the API, login, tokens
 // and UI. A host that matches neither (workers.dev, wrangler dev) gets one
 // origin that serves everything.

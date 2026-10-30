@@ -4,8 +4,8 @@
 #
 # binaries: the four standalone binaries + SHA256SUMS on the GitHub release;
 # install.sh (served by the worker at /install.sh) downloads them. Built on
-# macOS: bun cross-compiles all four targets from there (finding
-# bun-cross-compile-darwin).
+# macOS: bun cross-compiles all four targets from there (from Linux arm64,
+# the darwin targets fail to build).
 # npm: @metabase/shares through npm trusted publishing (OIDC, no token
 # secret). Environment "npm" gates it; the package on npmjs.com must name
 # this repo and workflow as its trusted publisher.

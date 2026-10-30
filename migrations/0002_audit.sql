@@ -1,4 +1,4 @@
--- Audit log of security-relevant changes (SHR-9: public on/off). Rows are
+-- Audit log of security-relevant changes (public on/off). Rows are
 -- only added, never changed. Times are ms since the epoch.
 CREATE TABLE audit (
   id     INTEGER PRIMARY KEY AUTOINCREMENT,

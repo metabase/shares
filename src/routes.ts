@@ -103,8 +103,8 @@ const keyOf = (url: URL) => decodeURIComponent(url.pathname.slice(1))
 const isPrivatePage = (key: string) => key === '' || key === '_token' || key === '_stats' || key === '_device'
   || key === '_collections' || key.startsWith('_s/')
 
-// PUBLIC_SHARING: a share its owner marked public opens without login
-// (SHR-9). Only share paths: private pages and _-prefixed paths never.
+// PUBLIC_SHARING: a share its owner marked public opens without login.
+// Only share paths: private pages and _-prefixed paths never.
 async function isPublicShare(env: Env, store: ShareStore, key: string) {
   const top = key.split('/')[0]
   return env.PUBLIC_SHARING === '1' && !!top && !top.startsWith('_') && store.isPublic(top)

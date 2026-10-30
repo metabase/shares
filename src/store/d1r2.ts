@@ -1,5 +1,4 @@
-// ShareStore over D1 metadata + R2 blobs (decisions replatform-r2-d1,
-// d1-schema-0001, versioned-publish-d1r2):
+// ShareStore over D1 metadata + R2 blobs:
 //   R2 blobs/<sha256>   file bytes, the same bytes stored once
 //   D1 shares           owner, current_version (what readers see)
 //   D1 versions, files  one row set per publish; 'pending' until committed
@@ -365,7 +364,7 @@ export class D1R2Store implements ShareStore, QueryStore {
     }
   }
 
-  // One share from the mb-shares KV export (SHR-10): a complete version
+  // One share from the mb-shares KV export: a complete version
   // with the owner, uploader and times of the old store, and its view log.
   // A second import of the same files changes only the views; other files
   // make a new version. A share of another owner is refused.

@@ -1,4 +1,4 @@
-// HTTP API of the Worker, for clients (the TS CLI, SHR-7). No imports: the
+// HTTP API of the Worker, for clients (the TS CLI). No imports: the
 // CLI imports this file without the Worker's runtime types.
 //
 // Every endpoint but /_cli, /_skill, /_install.sh and /_device/* takes
@@ -52,7 +52,7 @@ export interface ApiEndpoints {
   'DELETE /<slug>/': { response: string }
   // admin: rebuild manifests and owners; response "migrated <n>\n"
   'POST /_migrate': { response: string }
-  // admin: one share from the mb-shares KV export (SHR-10), blobs first
+  // admin: one share from the mb-shares KV export, blobs first
   // (/_blobs). 409 when another owner has the slug; 501 on KV.
   'POST /_import/<slug>': { body: ImportRequest; response: ImportResponse }
   // the caller of this token (JSON; KV store too)
@@ -62,7 +62,7 @@ export interface ApiEndpoints {
   // revoke a token of yours; "current": the token of this request
   // (`share logout`). 404 {"error"} when no live token has that id.
   'DELETE /_api/tokens/<id>': { response: { revoked: string } }
-  // admin: service tokens for agents and CI (SHR-13). POST makes one; the
+  // admin: service tokens for agents and CI. POST makes one; the
   // token is in the response only. ?kind=service on GET lists all of them,
   // on DELETE revokes one of them.
   'POST /_api/tokens': { body: ServiceTokenCreate; response: ServiceTokenCreated }

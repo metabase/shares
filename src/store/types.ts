@@ -15,7 +15,7 @@ export interface ShareSummary {
   n: number // file count
   t: number // newest timestamp, 0 when unknown
   o?: string // owner email; undefined on legacy shares (= ADMIN_EMAIL)
-  pub?: boolean // owner marked it public (SHR-9); D1+R2 only
+  pub?: boolean // owner marked it public; D1+R2 only
   title?: string // D1+R2 only
 }
 
@@ -88,13 +88,13 @@ export interface ShareStore {
   // returns the new version number. owner: of a new share, default by
   commit?(slug: string, files: CommitFile[], by: string, message?: string, attrs?: ShareAttrs, owner?: string): Promise<number>
 
-  // Public shares (SHR-9), D1+R2 only. isPublic is false on the KV adapter.
+  // Public shares, D1+R2 only. isPublic is false on the KV adapter.
   isPublic(slug: string): Promise<boolean>
   // set the public bit and add an audit row, in one batch
   setPublic?(slug: string, on: boolean, by: string): Promise<void>
   audit?(limit: number): Promise<AuditEntry[]>
 
-  // One share from the mb-shares KV export (SHR-10), D1+R2 only. by: the
+  // One share from the mb-shares KV export, D1+R2 only. by: the
   // admin who imports, for the audit log.
   importShare?(slug: string, r: ImportRequest, by: string): Promise<ImportResponse>
 }
@@ -108,7 +108,7 @@ export interface ShareFilter {
   before?: number
 }
 
-// Collections, share attributes and JSON reads (SHR-12). D1+R2 only.
+// Collections, share attributes and JSON reads. D1+R2 only.
 export interface QueryStore {
   collections(prefix?: string): Promise<Collection[]>
   collection(slug: string): Promise<Collection | null>
@@ -122,7 +122,7 @@ export interface QueryStore {
   // live version when version is undefined; null when there is none
   shareManifest(slug: string, version?: number): Promise<ShareManifest | null>
 
-  // Web app (SHR-15). Full text search over slug, title, collection, owner,
+  // Web app. Full text search over slug, title, collection, owner,
   // file paths and metadata; every word is a prefix. Best match first.
   search(q: string, owner: string | undefined, limit: number): Promise<ShareInfo[]>
   // bytes of a blob from a manifest, any version
@@ -138,7 +138,7 @@ export function isQueryStore(s: ShareStore): s is ShareStore & QueryStore {
 }
 
 // "<slug>@<n>" as the top segment of a read path names version n of a
-// share (SHR-14): /<slug>@3/report.html. Only complete versions are
+// share: /<slug>@3/report.html. Only complete versions are
 // readable. Writes refuse such a slug, so it never names a share of its own.
 const PINNED = /^(.+)@([1-9][0-9]{0,8})$/
 

@@ -1,8 +1,7 @@
--- R2 + D1 store (decision replatform-r2-d1). File bytes live in R2 under
+-- R2 + D1 store. File bytes live in R2 under
 -- blobs/<sha256>; D1 holds everything else. Times are ms since the epoch.
--- One migration for the whole chapter: SHR-4 (publish), SHR-6/SHR-13
--- (tokens), SHR-9 (public), SHR-12 (collections, metadata) use these tables
--- as they are.
+-- One migration for the whole schema: publish, tokens, public shares,
+-- collections and metadata use these tables as they are.
 
 CREATE TABLE users (
   email         TEXT PRIMARY KEY,           -- lowercase
@@ -29,7 +28,7 @@ CREATE TABLE shares (
   collection      TEXT REFERENCES collections(slug) ON DELETE SET NULL,
   -- version that readers see; NULL until the first publish completes
   current_version INTEGER,
-  -- readable without login when PUBLIC_SHARING is on (SHR-9)
+  -- readable without login when PUBLIC_SHARING is on
   public          INTEGER NOT NULL DEFAULT 0,
   created_at      INTEGER NOT NULL,
   updated_at      INTEGER NOT NULL
@@ -66,7 +65,7 @@ CREATE TABLE files (
 -- blob garbage collection: is a sha256 still referenced
 CREATE INDEX files_sha256 ON files(sha256);
 
--- free-form metadata per share, queried by the JSON API (SHR-12)
+-- free-form metadata per share, queried by the JSON API
 CREATE TABLE share_meta (
   share TEXT NOT NULL REFERENCES shares(slug) ON DELETE CASCADE,
   key   TEXT NOT NULL,
@@ -75,7 +74,7 @@ CREATE TABLE share_meta (
 );
 CREATE INDEX share_meta_key ON share_meta(key, value);
 
--- CLI and service tokens (SHR-6, SHR-13). The secret is shown once; only
+-- CLI and service tokens. The secret is shown once; only
 -- its sha256 is stored.
 CREATE TABLE tokens (
   id           TEXT PRIMARY KEY,            -- public id, part of the token

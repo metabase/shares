@@ -32,7 +32,7 @@ index d236ff0..a708882 100644
      return res
  }
  
-+// Move to the Metabase Cloudflare account (metabase/shares SHR-10), in two
++// Move to the Metabase Cloudflare account (metabase/shares), in two
 +// steps, each a var change:
 +//   READ_ONLY = "1"   reads work, writes give 503: the KV export runs now.
 +//   MOVED_TO = "https://shares.metabase.fyi"   every read is a 301 to the

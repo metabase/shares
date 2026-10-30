@@ -1,5 +1,5 @@
-// Which host a request is for, and the origins of the two hosts (decision
-// two-hosts-on-metabase-fyi). No imports from routes: renderers use it too.
+// Which host a request is for, and the origins of the two hosts. No
+// imports from routes: renderers use it too.
 
 import type { Env } from './env'
 

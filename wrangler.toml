@@ -13,8 +13,8 @@ fallthrough = true
 binding = "SHARES"
 id = "8e746d88c3254e1b83b82eb02db9be0c"
 
-# R2 + D1 store (decision replatform-r2-d1). Placeholder ids: `wrangler dev`
-# runs both locally; SHR-2 sets the real ids of the Metabase account.
+# R2 + D1 store. Placeholder ids: `wrangler dev` runs both locally;
+# [env.metabase] has the real ids of the Metabase account.
 # Local D1: bun x wrangler d1 migrations apply shares --local
 [[d1_databases]]
 binding = "DB"
@@ -27,7 +27,7 @@ binding = "BLOBS"
 bucket_name = "shares-blobs"
 
 [vars]
-# public id of the Internal OAuth client in the Metabase GCP org (SHR-3)
+# public id of the Internal OAuth client in the Metabase GCP org
 GOOGLE_CLIENT_ID = "22970549836-hbrr8eiinejkmr5b68lst9mc6vd341no.apps.googleusercontent.com"
 ALLOWED_DOMAIN = "metabase.com"
 ADMIN_EMAIL = "bryan@metabase.com"
@@ -53,17 +53,17 @@ id = "be3e6920240f4cebb6d0c0ab8d4c4f27"
 PUBLIC = "1"
 ADMIN_EMAIL = "bryan.maass@gmail.com"
 
-# metabase: the Metabase Cloudflare account, zone metabase.fyi (SHR-2).
+# metabase: the Metabase Cloudflare account, zone metabase.fyi.
 # CI (.github/workflows/ci.yml) deploys it on each push to main, after tests:
 #   bun x wrangler d1 migrations apply shares --env metabase --remote
 #   bun x wrangler deploy --env metabase
 # shares.metabase.fyi holds share content only; app.shares.metabase.fyi holds the API,
-# login, tokens and UI (lll decision two-hosts-on-metabase-fyi).
+# login, tokens and UI, so user HTML never runs on the origin that holds tokens.
 # The TS worker with the D1+R2 store; no SHARES KV here. wrangler does not inherit
 # top-level vars or bindings: a var the worker reads must also be in this env.
 # secrets: bun x wrangler secret put <NAME> --env metabase
 #   SESSION_SECRET        -- random, signs session cookies
-#   GOOGLE_CLIENT_SECRET  -- from the Internal OAuth client (SHR-3)
+#   GOOGLE_CLIENT_SECRET  -- from the Internal OAuth client
 [env.metabase]
 name = "shares"
 account_id = "4f68a0299231e43ec1c7f75c50d21cb6"
@@ -85,11 +85,11 @@ binding = "BLOBS"
 bucket_name = "shares-blobs"
 
 [env.metabase.vars]
-# public id of the Internal OAuth client in the Metabase GCP org (SHR-3)
+# public id of the Internal OAuth client in the Metabase GCP org
 GOOGLE_CLIENT_ID = "22970549836-hbrr8eiinejkmr5b68lst9mc6vd341no.apps.googleusercontent.com"
 ALLOWED_DOMAIN = "metabase.com"
 CONTENT_HOST = "shares.metabase.fyi"
 APP_HOST = "app.shares.metabase.fyi"
-# admin: /_import, /_stats, /_audit, service tokens (A135)
+# admin: /_import, /_stats, /_audit, service tokens
 ADMIN_EMAIL = "tyler@metabase.com"
 # PUBLIC_SHARING is off here; set PUBLIC_SHARING = "1" to allow public shares

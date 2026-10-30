@@ -1,4 +1,4 @@
--- Search of the web app (SHR-15): one FTS5 row per published share. The
+-- Search of the web app: one FTS5 row per published share. The
 -- D1+R2 store writes the row again in each batch that changes a share
 -- (publish, attributes, rename, transfer, delete); see reindex() in
 -- src/store/d1r2.ts. paths: the files of the live version; meta: keys and

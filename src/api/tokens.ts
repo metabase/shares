@@ -1,6 +1,6 @@
 // Bearer endpoints for CLI tokens: whoami, list, and revoke (`share logout`
 // revokes "current", the token of the request). The admin also creates,
-// lists and revokes service tokens (SHR-13). Types: api-types.ts.
+// lists and revokes service tokens. Types: api-types.ts.
 
 import type { Env } from '../env'
 import type { ServiceTokenCreate, ServiceTokenInfo, WhoAmI } from '../api-types'
