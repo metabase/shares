@@ -116,6 +116,28 @@ export function idTokenEmail(c: IdClaims, env: Env): string | null {
   return email.endsWith(`@${domain}`) ? email : null
 }
 
+const LOOPBACK = new Set(['localhost', '127.0.0.1', '[::1]'])
+
+// GET /_dev/login?email=&next=: a session without Google, for `wrangler dev`.
+// Only with DEV_LOGIN=1 (.dev.vars; no deploy env sets it) and on a loopback
+// host. null: not enabled here, the request goes on as any other path.
+export async function devLogin(req: Request, url: URL, env: Env): Promise<Response | null> {
+  if (env.DEV_LOGIN !== '1' || env.PUBLIC || req.method !== 'GET' || !LOOPBACK.has(url.hostname)) return null
+  const email = (url.searchParams.get('email') || env.ADMIN_EMAIL).toLowerCase()
+  if (!email.endsWith(`@${env.ALLOWED_DOMAIN.toLowerCase()}`)) {
+    return new Response(`email must be @${env.ALLOWED_DOMAIN}\n`, { status: 400 })
+  }
+  const next = url.searchParams.get('next') || '/'
+  const session = await signEmail(env, email, SESSION_DAYS * 86400)
+  return new Response(null, {
+    status: 302,
+    headers: {
+      location: /^\/(?![/\\])/.test(next) ? next : '/',
+      'set-cookie': setCookie(COOKIE.combined, session, SESSION_DAYS * 86400),
+    },
+  })
+}
+
 export async function handleCallback(url: URL, env: Env, cookie: string = COOKIE.combined) {
   const code = url.searchParams.get('code')
   if (!code) return new Response('missing code', { status: 400 })

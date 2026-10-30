@@ -1,6 +1,6 @@
 import type { Env } from './env'
 import {
-  COOKIE, CONTENT_TAG, SESSION_DAYS, TICKET_SECONDS, handleCallback, redirectToGoogle, sessionEmail,
+  COOKIE, CONTENT_TAG, SESSION_DAYS, TICKET_SECONDS, devLogin, handleCallback, redirectToGoogle, sessionEmail,
   authenticate, setCookie, signEmail, ticketTag, verifyEmail,
 } from './auth'
 import { cli } from './api/cli'
@@ -123,6 +123,10 @@ export async function handle(req: Request, env: Env, ctx: ExecutionContext): Pro
   if (isApi(req, url)) return api(req, url, env, store)
 
   if (url.pathname === '/auth/callback' && !env.PUBLIC) return handleCallback(url, env)
+  if (url.pathname === '/_dev/login') {
+    const dev = await devLogin(req, url, env)
+    if (dev) return dev
+  }
 
   // PUBLIC (pubshare deploy): anonymous read-only viewers, no login.
   // Writes still go through the bearer-token branch above.

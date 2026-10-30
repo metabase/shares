@@ -20,6 +20,9 @@ export interface Env {
   // one origin serves everything.
   CONTENT_HOST?: string
   APP_HOST?: string
+  // "1": GET /_dev/login signs in without Google on a loopback host.
+  // Local only (.dev.vars); no deploy env sets it.
+  DEV_LOGIN?: string
 
   // secrets
   GOOGLE_CLIENT_SECRET?: string

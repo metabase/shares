@@ -1,0 +1,8 @@
+# wrangler dev only. Copy to .dev.vars.
+SESSION_SECRET=dev-secret
+# CLI token for the local worker: SHARES_URL=http://localhost:8787 SHARES_TOKEN=dev-upload share ...
+UPLOAD_TOKEN=dev-upload
+# GET /_dev/login signs in without Google (loopback hosts only)
+DEV_LOGIN=1
+# you, to see the admin view; /_dev/login signs in as this email by default
+# ADMIN_EMAIL=you@metabase.com
