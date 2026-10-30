@@ -11,6 +11,8 @@ export const CONFIG_KEYS = ['BASE_URL', 'CONTENT_URL', 'UPLOAD_TOKEN'] as const
 
 export interface Config {
   path: string
+  // path is the old mb-shares env file: its BASE_URL is the old worker
+  legacy: boolean
   baseUrl?: string
   contentUrl?: string
   token?: string
@@ -48,6 +50,7 @@ export function loadConfig(env: Env = process.env): Config {
   const trim = (u?: string) => u?.replace(/\/+$/, '') || undefined
   return {
     path,
+    legacy: path === join(home, '.config/mb-shares/env'),
     baseUrl: trim(env.SHARES_URL || file.BASE_URL || env.BASE_URL),
     contentUrl: trim(env.SHARES_CONTENT_URL || file.CONTENT_URL || env.CONTENT_URL),
     token: env.SHARES_TOKEN || file.UPLOAD_TOKEN || env.UPLOAD_TOKEN || undefined,
