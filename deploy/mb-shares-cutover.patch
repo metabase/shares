@@ -1,0 +1,83 @@
+From 7f4325f914939519df3fc55afeb68bf98b1153c7 Mon Sep 17 00:00:00 2001
+From: Tyler Plude <tyler@metabase.com>
+Date: Thu, 29 Oct 2026 14:56:31 -0700
+Subject: [PATCH] feat: READ_ONLY and MOVED_TO vars for the move to the
+ Metabase account
+
+READ_ONLY=1 refuses writes (503) while the KV export runs. MOVED_TO
+answers every read with a 301 to the same path on the new host, and
+writes and bearer calls with 410 and the new CLI install line.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ src/index.js  | 31 +++++++++++++++++++++++++++++++
+ wrangler.toml |  4 ++++
+ 2 files changed, 35 insertions(+)
+
+diff --git a/src/index.js b/src/index.js
+index d236ff0..a708882 100644
+--- a/src/index.js
++++ b/src/index.js
+@@ -42,6 +42,9 @@ export default {
+ async function handle(req, env, ctx) {
+   const url = new URL(req.url)
+ 
++    const moved = cutover(req, url, env)
++    if (moved) return moved
++
+     // CLI endpoints: bearer token, no cookies involved. Bearer GET serves
+     // raw bytes (for `share download`); browsers never send one.
+     const bearer = (req.headers.get('authorization') || '').replace(/^Bearer /, '')
+@@ -72,6 +75,34 @@ async function handle(req, env, ctx) {
+     return res
+ }
+ 
++// Move to the Metabase Cloudflare account (metabase/shares), in two
++// steps, each a var change:
++//   READ_ONLY = "1"   reads work, writes give 503: the KV export runs now.
++//   MOVED_TO = "https://shares.metabase.fyi"   every read is a 301 to the
++//     same path there; writes and bearer calls give 410 with the new
++//     address (the old CLI must not follow a redirect with a token).
++//   MOVED_APP = "https://app.shares.metabase.fyi"   named in the 410 text.
++function cutover(req, url, env) {
++  const api = (req.method !== 'GET' && req.method !== 'HEAD') || req.headers.has('authorization')
++    || url.pathname === '/_list'
++  if (env.MOVED_TO) {
++    if (api) {
++      const app = env.MOVED_APP || env.MOVED_TO
++      return new Response(`mb-shares moved to ${env.MOVED_TO}. Install the new share CLI: `
++        + `curl -fsSL ${app}/install.sh | sh && share login\n`, { status: 410 })
++    }
++    return new Response(null, {
++      status: 301,
++      headers: { location: `${env.MOVED_TO.replace(/\/$/, '')}${url.pathname}${url.search}` },
++    })
++  }
++  if (env.READ_ONLY && req.method !== 'GET' && req.method !== 'HEAD') {
++    return new Response('mb-shares is read only while it moves to a new host; try again later\n',
++      { status: 503, headers: { 'retry-after': '600' } })
++  }
++  return null
++}
++
+ // View log per share: _views/<top> = { email: { n, last } }. Read-modify-
+ // write; concurrent viewers can drop an increment -- fine for analytics.
+ // The 30min gap collapses reloads and auto-refresh into one view, keeping
+diff --git a/wrangler.toml b/wrangler.toml
+index 7ecc40e..d267e0d 100644
+--- a/wrangler.toml
++++ b/wrangler.toml
+@@ -18,6 +18,10 @@ id = "8e746d88c3254e1b83b82eb02db9be0c"
+ GOOGLE_CLIENT_ID = "1089089243557-frsr7vf4s7pja4b3uq33naughhh0gk1m.apps.googleusercontent.com"
+ ALLOWED_DOMAIN = "metabase.com"
+ ADMIN_EMAIL = "bryan@metabase.com"
++# cutover to the Metabase account (see cutover() in src/index.js):
++# READ_ONLY = "1"
++# MOVED_TO = "https://shares.metabase.fyi"
++# MOVED_APP = "https://app.shares.metabase.fyi"
+ 
+ # secrets (set via: bun x wrangler secret put <NAME>):
+ #   GOOGLE_CLIENT_SECRET  -- from the Google OAuth client
+-- 
+2.39.5 (Apple Git-154)
+

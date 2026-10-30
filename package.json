@@ -1,9 +1,25 @@
 {
   "name": "mb-shares-worker",
   "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "wrangler dev",
+    "typecheck": "tsc -p .",
+    "test": "tsc -p . && tsc -p cli && vitest run && vitest run --config cli/vitest.config.ts",
+    "cli:build": "bun cli/build.ts",
+    "db:migrate:local": "wrangler d1 migrations apply shares --local"
+  },
   "dependencies": {
     "fflate": "^0.8.3",
     "marked": "^15.0.0",
     "marked-footnote": "^1.4.0"
+  },
+  "devDependencies": {
+    "@cloudflare/vitest-plugin": "1.4.11",
+    "@cloudflare/workers-types": "^5.20261029.1",
+    "@types/node": "22",
+    "typescript": "5.9",
+    "vitest": "~4.1.0",
+    "wrangler": "4.156.0"
   }
 }
