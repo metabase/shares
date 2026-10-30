@@ -470,10 +470,16 @@ async function legacyUpload(api: Client, slug: string, blobs: (LocalFile & { dat
   return null
 }
 
+// The app to log in at. The old mb-shares env file names the old worker,
+// which has no device flow, so login does not use its BASE_URL.
+export function loginBase(arg: string | undefined, env: Record<string, string | undefined>, cfg: Config) {
+  return (arg || env.SHARES_URL || (cfg.legacy ? undefined : cfg.baseUrl) || DEFAULT_APP).replace(/\/+$/, '')
+}
+
 // device flow: the app host shows a code,
 // a signed-in user approves it, this polls until the token comes
 async function login(ctx: Ctx, arg?: string) {
-  const base = (arg || ctx.io.env.SHARES_URL || ctx.cfg.baseUrl || DEFAULT_APP).replace(/\/+$/, '')
+  const base = loginBase(arg, ctx.io.env, ctx.cfg)
   const anon = client(base)
   const host = (() => { try { return hostname().split('.')[0] } catch { return 'unknown' } })()
   const start = await anon.json<DeviceStartResponse>('POST', '/_device/code', { json: { name: `share cli on ${host}` }, auth: false })

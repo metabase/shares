@@ -4,7 +4,7 @@ import { join } from 'node:path'
 import { describe, expect, it } from 'vitest'
 import { loadConfig, parseConfig, updateConfig } from '../config'
 import { collect, defaultName, deslug, localCopy, mirror } from '../files'
-import { parseArgs } from '../main'
+import { loginBase, parseArgs } from '../main'
 
 const tmp = () => mkdtempSync(join(tmpdir(), 'share-unit-'))
 
@@ -101,7 +101,25 @@ describe('config', () => {
     mkdirSync(join(home, '.config/mb-shares'), { recursive: true })
     writeFileSync(join(home, '.config/mb-shares/env'), 'BASE_URL=https://old/\nUPLOAD_TOKEN=t\n')
     const c = loadConfig({ HOME: home })
-    expect(c).toMatchObject({ baseUrl: 'https://old', token: 't', path: join(home, '.config/mb-shares/env') })
+    expect(c).toMatchObject({ baseUrl: 'https://old', token: 't', path: join(home, '.config/mb-shares/env'), legacy: true })
+  })
+
+  it('logs in at the default app, not the BASE_URL of the old mb-shares env file', () => {
+    const home = tmp()
+    mkdirSync(join(home, '.config/mb-shares'), { recursive: true })
+    writeFileSync(join(home, '.config/mb-shares/env'), 'BASE_URL=https://old/\nUPLOAD_TOKEN=t\n')
+    const env = { HOME: home }
+    expect(loginBase(undefined, env, loadConfig(env))).toBe('https://app.shares.metabase.fyi')
+    expect(loginBase('https://arg/', env, loadConfig(env))).toBe('https://arg')
+  })
+
+  it('logs in at the BASE_URL of the new config file', () => {
+    const home = tmp()
+    mkdirSync(join(home, '.config/shares'), { recursive: true })
+    writeFileSync(join(home, '.config/shares/config'), 'BASE_URL=https://mine/\n')
+    const env = { HOME: home }
+    expect(loadConfig(env).legacy).toBe(false)
+    expect(loginBase(undefined, env, loadConfig(env))).toBe('https://mine')
   })
 
   it('lets SHARES_TOKEN and SHARES_URL win over the file', () => {
