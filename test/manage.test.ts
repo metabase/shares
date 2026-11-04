@@ -135,6 +135,22 @@ describe('web app', () => {
     expect(d).toMatch(/new\.txt<\/b> <span class="tag">added/)
   })
 
+  it('gives the list rows and the share page header icon buttons with a label, one toast and the link favicon', async () => {
+    const t = await userToken(OWNER)
+    const top = slug('ic')
+    await commit(top, { 'a.md': 'a' }, t)
+    const list = (await text('/')).body
+    expect(list).toMatch(new RegExp(`class="ic cp" data-u="[^"]*/${top}/" aria-label="Copy link" title="Copy link"><svg`))
+    expect(list).toContain(`href="/_s/${top}" aria-label="Settings" title="Settings"><svg`)
+    expect(list.match(/id="toast" role="status" aria-live="polite"/g)).toHaveLength(1)
+    expect(list).toContain('<link rel="icon" href="data:image/svg+xml,')
+    expect(list).toContain(encodeURIComponent('🔗'))
+    const sh = (await text(`/_s/${top}`)).body
+    expect(sh).toContain('aria-label="Copy link"')
+    expect(sh).toMatch(/href="[^"]*_zip" aria-label="Download zip" title="Download zip"><svg/)
+    expect(sh).toMatch(/class="btn pri" href="[^"]*">Open<\/a>/)
+  })
+
   it('shows the manage forms and views to the owner only', async () => {
     const t = await userToken(OWNER)
     const top = slug('mg')

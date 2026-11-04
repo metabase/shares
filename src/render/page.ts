@@ -23,11 +23,16 @@ function vhash(s: string) {
 // opts.copy: show the fixed top-right button that copies the raw file.
 // opts.poll: false disables the auto-refresh poll -- the listing page must
 // not re-render itself every 15s (each render costs a KV list; 1k/day cap).
+// The link emoji as the tab icon of every page that page() makes.
+const FAVICON = 'data:image/svg+xml,' + encodeURIComponent(
+  '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100"><text y=".9em" font-size="90">🔗</text></svg>')
+
 export function page(title: string, body: string, opts: PageOpts = {}) {
   const v = vhash(opts.vsrc || body)
   return new Response(
     `<!doctype html><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <title>${esc(title)}</title>
+<link rel="icon" href="${FAVICON}">
 <meta name="v" content="${v}">
 <script>try{var _t=localStorage.getItem('theme');if(_t)document.documentElement.setAttribute('data-theme',_t)}catch(e){}</script>
 <style>
@@ -140,20 +145,16 @@ ${opts.slug ? `<footer><small>clone this share: <code>share download ${esc(opts.
     link(li, claim('item-' + path.join('-')))
   })
   document.querySelectorAll('pre').forEach(function (pre) {
-    if (pre.closest('#pv')) return
-    // a pre in a .cb wrapper (app pages) gets its button in the top right
-    // corner of the block, with sentence case labels
-    var cb = pre.parentElement.classList.contains('cb')
-    var label = cb ? 'Copy' : 'copy'
+    // the list preview and app code blocks (.cb) have their own copy button
+    if (pre.closest('#pv') || pre.parentElement.classList.contains('cb')) return
     var b = document.createElement('button')
-    b.textContent = label; b.className = cb ? 'copy sm' : 'copy'
+    b.textContent = 'copy'; b.className = 'copy'
     b.onclick = function () {
       navigator.clipboard.writeText(pre.textContent).then(function () {
-        b.textContent = cb ? 'Copied' : 'copied'
-        setTimeout(function () { b.textContent = label }, 1200)
+        b.textContent = 'copied'
+        setTimeout(function () { b.textContent = 'copy' }, 1200)
       })
     }
-    if (cb) return pre.insertAdjacentElement('beforebegin', b)
     // diagram fences also get an "open on" link to the language's own
     // editor, source carried in the URL fragment (never sent to a server)
     var lang = pre.querySelector('code.language-mermaid') ? 'mermaid'

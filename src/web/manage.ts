@@ -6,7 +6,7 @@
 
 import type { Env } from '../env'
 import { esc, notFound, page } from '../render/page'
-import { STYLE, nav, when } from './shell'
+import { STYLE, copyLink, iconLink, nav, when } from './shell'
 import { contentBase } from '../origins'
 import { isQueryStore, StoreError, type QueryStore, type ShareStore } from '../store'
 import type { ShareInfo, VersionInfo } from '../api-types'
@@ -54,7 +54,7 @@ export async function sharePage(url: URL, env: Env, store: ShareStore, email: st
   return page(title, `${STYLE}<div class="app sh">${nav(email, env, 'shares')}
 <div class="top"><div><h1 title="${esc(title)}">${esc(title)}</h1>
 <p class="slugline">${slugLine(slug, share.collection)}</p></div>
-<div class="acts"><button class="sm cp" data-u="${esc(content)}">Copy link</button><a class="btn sm" href="${esc(content)}_zip">Download zip</a><a class="btn pri" href="${esc(content)}">Open</a></div></div>
+<div class="acts">${copyLink(content)}${iconLink(`${content}_zip`, 'download', 'Download zip')}<a class="btn pri" href="${esc(content)}">Open</a></div></div>
 <dl class="strip">
 <div><dt>Owner</dt><dd>${esc(share.owner)}</dd></div>
 <div><dt>Collection</dt><dd>${share.collection ? `<a href="/?c=${encodeURIComponent(share.collection)}">${esc(share.collection)}</a>` : '—'}</dd></div>
@@ -71,15 +71,7 @@ ${manage ? `<h2>Views</h2>${viewRows.length
     : '<p class="sub">No views yet.</p>'}
 ${manageForms(share, self, email, env)}` : ''}
 </div>
-<script>
-document.querySelectorAll('.sh button.cp').forEach(function (b) {
-  b.addEventListener('click', function () {
-    navigator.clipboard.writeText(new URL(b.getAttribute('data-u'), location.href).href).then(function () {
-      b.textContent = 'Copied'; setTimeout(function () { b.textContent = 'Copy link' }, 900)
-    })
-  })
-})
-</script>`, { poll: false })
+`, { poll: false })
 }
 
 // The slug as a path under its collection; the collection part links to

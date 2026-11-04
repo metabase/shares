@@ -7,7 +7,7 @@ import type { ShareInfo } from '../api-types'
 import { contentBase, hostKind } from '../origins'
 import { approvePage, tokenPage } from './tokens'
 import { collectionsPage, sharePage } from './manage'
-import { STYLE, nav, when } from './shell'
+import { ICON, STYLE, copyLink, iconLink, nav, when } from './shell'
 
 const summary = (s: ShareInfo): [string, ShareSummary] =>
   [s.slug, { n: s.fileCount, t: s.updatedAt, o: s.owner, ...(s.title ? { title: s.title } : {}) }]
@@ -64,8 +64,8 @@ export async function serve(url: URL, email: string | null, env: Env, store: Sha
       }<td class="n">${s.n} file${
         s.n === 1 ? '' : 's'}</td>${viewCell(p)}<td class="t" title="${
         s.t ? new Date(s.t).toISOString() : 'published before timestamps existed'}">${
-        ago(s.t)}</td><td class="acts"><button class="sm cp" data-u="${content}/${esc(p)}/">Copy link</button>${
-        query ? ` <a class="btn sm" href="/_s/${encodeURIComponent(p)}" title="Versions, diffs, rename, delete">Settings</a>` : ''}</td></tr>`)
+        ago(s.t)}</td><td class="acts">${copyLink(`${content}/${p}/`)}${
+        query ? ` ${iconLink(`/_s/${encodeURIComponent(p)}`, 'gear', 'Settings')}` : ''}</td></tr>`)
     const head = `<thead><tr><th>Share</th>${owners ? '<th>Owner</th>' : ''}<th class="r">Files</th><th class="r">Viewers</th><th>Updated</th><th></th></tr></thead>`
     // admin scope toggle; the search text stays across the switch
     const qs = q ? `q=${encodeURIComponent(q)}` : ''
@@ -86,9 +86,10 @@ export async function serve(url: URL, email: string | null, env: Env, store: Sha
   #pv::after{content:'';position:absolute;left:0;right:0;bottom:-14px;height:14px}
   #pv .f{color:var(--muted);font-size:.75rem;margin:0 3.5rem .25rem 0;
     font-family:ui-monospace,SFMono-Regular,Menlo,monospace}
-  #pv .c{position:absolute;top:.35rem;right:.4rem;font:inherit;font-size:.7rem;
-    color:var(--muted);background:none;border:1px solid var(--border);border-radius:5px;
-    padding:.05em .45em;cursor:pointer}
+  #pv .c{position:absolute;top:.35rem;right:.4rem;display:flex;color:var(--muted);background:none;
+    border:1px solid var(--border);border-radius:5px;padding:.2rem;cursor:pointer}
+  #pv .c svg{width:14px;height:14px}
+  #pv .c:focus-visible{outline:2px solid var(--link);outline-offset:2px}
   #pv .c:hover{color:var(--fg);border-color:var(--muted)}
   #pv pre{margin:0;padding:0;background:none;min-width:0;width:auto;left:0;transform:none;
     max-width:none;font-size:.75rem;line-height:1.4;white-space:pre-wrap;overflow:hidden}
@@ -107,16 +108,9 @@ document.getElementById('q').addEventListener('input', function () {
     tr.style.display = tr.textContent.toLowerCase().indexOf(q) === -1 ? 'none' : ''
   })
 })
-document.querySelectorAll('.lst button.cp').forEach(function (b) {
-  b.addEventListener('click', function () {
-    navigator.clipboard.writeText(new URL(b.getAttribute('data-u'), location.href).href).then(function () {
-      b.textContent = 'Copied'; setTimeout(function () { b.textContent = 'Copy link' }, 900)
-    })
-  })
-})
 var pv = document.createElement('div')
 pv.id = 'pv'
-pv.innerHTML = '<div class="f"></div><button class="c">copy</button><pre></pre>'
+pv.innerHTML = '<div class="f"></div><button type="button" class="c" aria-label="Copy" title="Copy">${ICON.copy}</button><pre></pre>'
 document.body.appendChild(pv)
 var pvCache = {}, pvHide = null, pvCur = null
 function hidePv() { pv.style.display = 'none'; pvCur = null }
@@ -133,10 +127,7 @@ pv.querySelector('.c').addEventListener('click', function () {
   fetch(pv.dataset.u + '_peek?full', { cache: 'no-store' })
     .then(function (r) { return r.json() })
     .then(function (j) { return navigator.clipboard.writeText(j.text) })
-    .then(function () {
-      b.textContent = 'copied'; setTimeout(function () { b.textContent = 'copy' }, 1000)
-    })
-    .catch(function () {})
+    .then(function () { appToast('Copied') }, function () { appToast('Could not copy') })
 })
 document.querySelectorAll('#shares tr').forEach(function (tr) {
   var u = tr.getAttribute('data-p')

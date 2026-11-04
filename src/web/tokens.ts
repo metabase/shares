@@ -5,7 +5,7 @@
 import type { Env } from '../env'
 import type { DeviceStartResponse, DeviceTokenResponse, TokenInfo } from '../api-types'
 import { esc, page } from '../render/page'
-import { STYLE as APP_STYLE, nav, when } from './shell'
+import { STYLE as APP_STYLE, codeBlock, nav, when } from './shell'
 import { appBase, contentBase, hostKind } from '../origins'
 import {
   DEVICE_SECONDS, POLL_SECONDS, createServiceToken, createToken, decideDevice, deviceByUserCode, formatUserCode,
@@ -128,12 +128,12 @@ export async function tokenPage(url: URL, env: Env, email: string,
   const shown = created?.service
     ? `<div class="box new"><h2>New service token <code>agent:${esc(created.name)}</code></h2>
 <p>Shown once. Give it to the agent as its bearer token:</p>
-<div class="cb"><pre><code>${esc(created.token)}</code></pre></div>
+${codeBlock(created.token)}
 </div>`
     : created
     ? `<div class="box new"><h2>New token <code>${esc(created.name)}</code></h2>
 <p>Shown once. This line saves it as the <code>share</code> config:</p>
-<div class="cb"><pre><code>${esc(`mkdir -p ~/.config/shares && (umask 077; printf 'BASE_URL=%s\\nCONTENT_URL=%s\\nUPLOAD_TOKEN=%s\\n' '${app}' '${content}' '${created.token}' > ~/.config/shares/config)`)}</code></pre></div>
+${codeBlock(`mkdir -p ~/.config/shares && (umask 077; printf 'BASE_URL=%s\\nCONTENT_URL=%s\\nUPLOAD_TOKEN=%s\\n' '${app}' '${content}' '${created.token}' > ~/.config/shares/config)`)}
 </div>`
     : ''
   return page('Install', `${STYLE}
@@ -143,12 +143,12 @@ export async function tokenPage(url: URL, env: Env, email: string,
 ${error ? `<div class="box err"><h2>Not created</h2><p>${esc(error)}</p></div>` : ''}${shown}<div class="step">
 <h2><span class="k">1</span>Install the <code>share</code> CLI and log in</h2>
 <p>Installs to <code>~/.local/bin</code> (macOS, Linux). <code>share login</code> opens this site to approve a new token.</p>
-<div class="cb"><pre><code>${esc(install)}</code></pre></div>
+${codeBlock(install)}
 </div>
 <div class="step">
 <h2><span class="k">2</span>Install the Claude Code skill <small>(optional)</small></h2>
 <p>Teaches Claude Code to publish, read and pull shares. Run it again to update.</p>
-<div class="cb"><pre><code>${esc(skill)}</code></pre></div>
+${codeBlock(skill)}
 </div>
 <div class="step">
 <h2><span class="k">3</span>Your tokens</h2>
