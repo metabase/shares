@@ -220,17 +220,63 @@ describe('web app', () => {
     expect((await text('/?q=xfer', OTHER)).body).toContain(`/_s/${top}`)
   })
 
-  it('sets the title and collection, and an empty field clears them', async () => {
+  it('sets the title on its own form, and an empty title clears it', async () => {
     const t = await userToken(OWNER)
     const top = slug('attr')
-    await commit(top, { 'a.md': 'a' }, t)
-    expect((await submit(top, { action: 'attrs', title: 'Narwhal notes', collection: 'notes/x' })).status).toBe(303)
+    await commit(top, { 'a.md': 'a' }, t, { collection: 'notes/x' })
+    expect((await submit(top, { action: 'title', title: 'Narwhal notes' })).status).toBe(303)
     let info = await (await api('GET', `/_api/shares/${top}`, { token: t })).json() as any
     expect(info).toMatchObject({ title: 'Narwhal notes', collection: 'notes/x' })
     expect((await text('/?q=narwhal')).body).toContain(`/_s/${top}`)
-    await submit(top, { action: 'attrs', title: '', collection: '' })
+    await submit(top, { action: 'title', title: '' })
     info = await (await api('GET', `/_api/shares/${top}`, { token: t })).json() as any
-    expect(info).toMatchObject({ title: null, collection: null })
+    expect(info).toMatchObject({ title: null, collection: 'notes/x' })
+  })
+
+  it('moves a share to a collection of another owner, to a new path, and out of its collection', async () => {
+    const t = await userToken(OWNER)
+    const top = slug('mv')
+    await commit(top, { 'a.md': 'a' }, t)
+    await commit(slug('mvo'), { 'a.md': 'a' }, await userToken(OTHER), { collection: 'theirs/x' })
+    const get = async () => (await (await api('GET', `/_api/shares/${top}`, { token: t })).json() as any).collection
+
+    const r = await submit(top, { action: 'move', collection: 'theirs/x', new: '' })
+    expect(r.status).toBe(303)
+    expect(r.headers.get('location')).toBe(`/_s/${top}?moved`)
+    expect(await get()).toBe('theirs/x')
+    expect((await (await api('GET', '/_api/collections/theirs/x', { token: t })).json() as any).owner).toBe(OTHER)
+
+    expect((await submit(top, { action: 'move', collection: 'theirs/x', new: '/Mine/New/' })).status).toBe(303)
+    expect(await get()).toBe('mine/new')
+    expect((await (await api('GET', '/_api/collections/mine/new', { token: t })).json() as any).owner).toBe(OWNER)
+
+    expect((await submit(top, { action: 'move', new: 'a/b/c/d/e' })).status).toBe(400)
+    expect((await submit(top, { action: 'move', collection: 'theirs/x' }, OTHER)).status).toBe(403)
+    expect(await get()).toBe('mine/new')
+
+    await submit(top, { action: 'move', collection: '' })
+    expect(await get()).toBe(null)
+  })
+
+  it('shows the collection as a chip with a picker and a no-JS form, and a notice after a move', async () => {
+    const t = await userToken(OWNER)
+    const top = slug('pk')
+    await commit(top, { 'a.md': 'a' }, t, { collection: 'pick/here' })
+    await commit(slug('pk2'), { 'a.md': 'a' }, t, { collection: 'pick/there' })
+    expect((await api('PUT', '/_api/collections/pick/there', { token: t, body: JSON.stringify({ title: 'There <b>' }) })).status).toBe(200)
+    const own = (await text(`/_s/${top}`)).body
+    expect(own).toContain('<span class="chip">pick/here</span>')
+    expect(own).toContain('<button type="button" class="mvb" aria-haspopup="dialog">Move</button>')
+    expect(own).toMatch(/<dialog class="pick"[^>]*>\s*<form method="post" action="[^"]+"><input type="hidden" name="action" value="move">/)
+    expect(own).toMatch(/role="option" name="collection" value="pick\/here" disabled[^>]*>[^]*?<span class="tag">current<\/span>/)
+    expect(own).toMatch(/value="pick\/there"\n data-k="pick\/there there &lt;b&gt;"><span class="p">pick\/there<\/span><span class="t">There &lt;b&gt;<\/span><span class="n">1 share<\/span>/)
+    expect(own).toContain('<option value="pick/here" selected>pick/here</option>')
+    expect(own).toContain('<label>Or a new path<input name="new"')
+    expect(own).not.toContain('Moved to')
+    const moved = (await text(`/_s/${top}?moved`)).body
+    expect(moved).toContain('<noscript><p class="moved" role="status">Moved to pick/here</p></noscript>')
+    expect(moved).toContain('appToast("Moved to pick/here", 3000)')
+    expect((await text(`/_s/${top}`, OTHER)).body).not.toContain('class="pick"')
   })
 
   it('shows the slug under its collection, and the edit-access hint to the owner only', async () => {

@@ -76,6 +76,39 @@ export const STYLE = `<style>
   .sh .frm form.dz{border:1px solid color-mix(in srgb,var(--danger) 45%,transparent);border-radius:8px;padding:.75rem 1rem}
   .sh .dzh{color:var(--danger);font-size:.85rem;margin:.5rem 0 0}
   @media (max-width:30rem){.sh .frm .two{grid-template-columns:1fr}}
+  .sh .moved{border:1px solid var(--border);border-radius:8px;padding:.4rem .8rem;font-size:.85rem;margin:0 0 1rem}
+  .sh .mvrow{display:flex;flex-wrap:wrap;align-items:center;gap:.4rem .6rem}
+  .sh .mvrow .lbl{font-size:.78rem;color:var(--muted);flex-basis:100%}
+  .sh .chip{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:.8rem;background:var(--code-bg);
+    border:1px solid var(--border);border-radius:6px;padding:.25rem .6rem;overflow-wrap:anywhere;min-width:0}
+  .sh .chip.none{font-family:inherit;color:var(--muted)}
+  .sh .mv.js .mvf,.sh .mv:not(.js) .mvb{display:none}
+  .sh .frm form.mvf{grid-template-columns:1fr 1fr auto;margin-top:.5rem}
+  @media (max-width:30rem){.sh .frm form.mvf{grid-template-columns:1fr auto}.sh .mvf label:first-of-type{grid-column:1/-1}}
+  .sh .mvf select{display:block;width:100%;margin-top:.2rem;font:inherit;font-size:.85rem;background:var(--code-bg);
+    color:var(--fg);border:1px solid var(--border);border-radius:6px;padding:.3rem .4rem}
+  .sh .pick{width:min(32rem,calc(100vw - 2rem));max-height:min(32rem,calc(100vh - 4rem));box-sizing:border-box;padding:0;
+    border:1px solid var(--border);border-radius:10px;background:var(--bg);color:var(--fg);
+    box-shadow:0 8px 32px rgba(0,0,0,.35)}
+  .sh .pick[open]{display:flex;flex-direction:column}
+  .sh .pick::backdrop{background:rgba(0,0,0,.45)}
+  .sh .pick form{display:flex;flex-direction:column;align-items:stretch;flex:1;min-height:0;margin:0}
+  .sh .pick .ph{display:flex;gap:.4rem;padding:.6rem;border-bottom:1px solid var(--border)}
+  .sh .pick .flt{flex:1;min-width:0}
+  .sh .pick .opts{overflow-y:auto;padding:.3rem;min-height:0}
+  .sh .pick [role=option]{display:flex;flex-wrap:wrap;align-items:baseline;gap:.1rem .6rem;width:100%;text-align:left;
+    background:none;border:0;border-radius:6px;padding:.45rem .6rem;font-weight:400}
+  .sh .pick [role=option][hidden]{display:none}
+  .sh .pick [role=option].on{background:var(--hover);outline:1px solid var(--border)}
+  .sh .pick [role=option]:disabled{cursor:default;opacity:.7}
+  .sh .pick .p{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:.8rem;overflow-wrap:anywhere}
+  .sh .pick .none .p{font-family:inherit;font-size:.85rem;color:var(--muted)}
+  .sh .pick .new{color:var(--link)}
+  .sh .pick .t{color:var(--muted);font-size:.8rem;overflow-wrap:anywhere}
+  .sh .pick .n{margin-left:auto;color:var(--muted);font-size:.75rem;font-variant-numeric:tabular-nums}
+  .sh .pick .none{border-top:1px solid var(--border);border-radius:0 0 6px 6px;margin-top:.2rem}
+  .sh .pick .hint{font-size:.75rem;color:var(--muted);margin:0;padding:0 .9rem}
+  .sh .pick .hint:not(:empty){padding:.5rem .9rem}
   .app pre{width:100%;box-sizing:border-box;margin:.4rem 0 0;font-size:.78rem;white-space:pre-wrap;
     overflow-wrap:anywhere}
   .app .d-add{background:rgba(46,160,67,.18)}
@@ -117,9 +150,9 @@ export const STYLE = `<style>
 (function () {
   var t = document.getElementById('toast'), h
   // one toast for all copy buttons; appToast is also for page scripts
-  window.appToast = function (m) {
+  window.appToast = function (m, ms) {
     t.textContent = m; t.classList.add('on')
-    clearTimeout(h); h = setTimeout(function () { t.classList.remove('on') }, 1500)
+    clearTimeout(h); h = setTimeout(function () { t.classList.remove('on') }, ms || 1500)
   }
   document.addEventListener('click', function (e) {
     var b = e.target.closest && e.target.closest('button.cp,button.cpt')
@@ -141,6 +174,7 @@ export const ICON = {
   link: svg('<path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/>'),
   gear: svg('<circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/>'),
   download: svg('<path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/>'),
+  x: svg('<line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/>'),
   copy: svg('<rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/>'),
 }
 

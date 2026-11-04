@@ -6,10 +6,10 @@
 
 import type { Env } from '../env'
 import { esc, notFound, page } from '../render/page'
-import { STYLE, copyLink, iconLink, nav, when } from './shell'
+import { ICON, STYLE, copyLink, iconLink, nav, when } from './shell'
 import { contentBase } from '../origins'
 import { isQueryStore, StoreError, type QueryStore, type ShareStore } from '../store'
-import type { ShareInfo, VersionInfo } from '../api-types'
+import type { Collection, ShareInfo, VersionInfo } from '../api-types'
 import { asText, hunks, lineDiff } from './diff'
 
 // one old file shown as text; bigger files show their size only
@@ -45,13 +45,14 @@ export async function sharePage(url: URL, env: Env, store: ShareStore, email: st
 
   const manage = canManage(share, email, env)
   const views = manage ? await store.views(slug) : null
+  const collections = manage ? await store.collections() : []
   const viewRows = Object.entries(views ?? {}).sort((a, b) => b[1].last - a[1].last)
     .map(([e, x]) => `<tr><td class="w">${esc(e)}</td><td class="r">${x.n}</td><td>${when(x.last)}</td></tr>`)
 
   const meta = Object.keys(share.meta).length
     ? `<div class="meta"><span>Meta</span><pre>${esc(JSON.stringify(share.meta, null, 2))}</pre></div>` : ''
   const title = share.title || slug
-  return page(title, `${STYLE}<div class="app sh">${nav(email, env, 'shares')}
+  return page(title, `${STYLE}<div class="app sh">${nav(email, env, 'shares')}${q.has('moved') ? movedNotice(share.collection) : ''}
 <div class="top"><div><h1 title="${esc(title)}">${esc(title)}</h1>
 <p class="slugline">${slugLine(slug, share.collection)}</p></div>
 <div class="acts">${copyLink(content)}${iconLink(`${content}_zip`, 'download', 'Download zip')}<a class="btn pri" href="${esc(content)}">Open</a></div></div>
@@ -69,7 +70,7 @@ ${versionTable(versions, self)}
 ${manage ? `<h2>Views</h2>${viewRows.length
     ? `<div class="scroll"><table><tr><th>Viewer</th><th class="r">Views</th><th>Last</th></tr>${viewRows.join('')}</table></div>`
     : '<p class="sub">No views yet.</p>'}
-${manageForms(share, self, email, env)}` : ''}
+${manageForms(share, self, email, env, collections)}` : ''}
 </div>
 `, { poll: false })
 }
@@ -162,15 +163,23 @@ ${blocks.join('\n')}${more}`
 const fileHead = (p: string, state: string, note?: string) =>
   `<p class="mono"><b>${esc(p)}</b> <span class="tag">${state}</span>${note ? ` <span class="sub">${note}</span>` : ''}</p>`
 
-function manageForms(share: ShareInfo, self: string, email: string, env: Env) {
+// The notice after a move: a toast, or an inline line without JS. The
+// script also takes ?moved off the address.
+function movedNotice(collection: string | null) {
+  const msg = collection ? `Moved to ${collection}` : 'Removed from its collection'
+  return `<noscript><p class="moved" role="status">${esc(msg)}</p></noscript>
+<script>appToast(${JSON.stringify(msg).replace(/</g, '\\u003c')}, 3000);history.replaceState(null, '', location.pathname)</script>`
+}
+
+function manageForms(share: ShareInfo, self: string, email: string, env: Env, collections: Collection[]) {
   const form = (action: string, body: string, cls = '') =>
     `<form method="post" action="${self}"${cls ? ` class="${cls}"` : ''}><input type="hidden" name="action" value="${action}">${body}</form>`
   const lose = email === share.owner && email !== env.ADMIN_EMAIL ? ' You lose edit access.' : ''
   return `<h2>Settings</h2>
 <div class="frm">
-${form('attrs', `<div class="two"><label>Title<input name="title" value="${esc(share.title ?? '')}" maxlength="500"></label>
-<label>Collection<input name="collection" value="${esc(share.collection ?? '')}"></label></div>
-<button class="pri">Save</button><p class="hint">An empty field clears the title or the collection.</p>`)}
+${form('title', `<label>Title<input name="title" value="${esc(share.title ?? '')}" maxlength="500" placeholder="${esc(share.slug)}"></label>
+<button class="pri">Save</button><p class="hint">An empty title shows the slug.</p>`)}
+${movePicker(share, self, collections)}
 ${form('rename', `<label>Rename slug<input name="to" placeholder="New slug" required pattern="[A-Za-z0-9][A-Za-z0-9._\\-]*"></label>
 <button>Rename</button><p class="hint">Old links stop working.</p>`)}
 ${form('transfer', `<label>Transfer to<input name="to" type="email" placeholder="New owner email" required></label>
@@ -179,6 +188,82 @@ ${form('transfer', `<label>Transfer to<input name="to" type="email" placeholder=
 ${form('delete', `<label>Type the slug to confirm<input name="confirm" placeholder="${esc(share.slug)}" required></label>
 <button class="danger">Delete</button><p class="hint">Deletes every version and its files. This cannot be undone.</p>`, 'dz')}
 </div>`
+}
+
+// The collection of the share as a path chip with a Move button. Move
+// opens a dialog: a filter on top, then the collections, "No collection",
+// and "Create <path>" for a new valid path. Each choice posts the move
+// action. Without JS, a select and a new-path field post the same action.
+function movePicker(share: ShareInfo, self: string, collections: Collection[]) {
+  const cur = share.collection
+  const opt = (c: Collection, i: number) => {
+    const here = c.slug === cur
+    return `<button id="mvo${i}" role="option" name="collection" value="${esc(c.slug)}"${here ? ' disabled aria-disabled="true"' : ''}
+ data-k="${esc(`${c.slug} ${c.title ?? ''}`.trim().toLowerCase())}"><span class="p">${esc(c.slug)}</span>${
+      c.title ? `<span class="t">${esc(c.title)}</span>` : ''}<span class="n">${c.shares} share${c.shares === 1 ? '' : 's'}</span>${
+      here ? '<span class="tag">current</span>' : ''}</button>`
+  }
+  const options = collections.map((c) => `<option value="${esc(c.slug)}"${c.slug === cur ? ' selected' : ''}>${esc(c.slug)}</option>`).join('')
+  return `<div class="mv" id="mv">
+<div class="mvrow"><span class="lbl">Collection</span><span class="chip${cur ? '' : ' none'}">${cur ? esc(cur) : 'No collection'}</span>
+<button type="button" class="mvb" aria-haspopup="dialog">Move</button></div>
+<form method="post" action="${self}" class="mvf"><input type="hidden" name="action" value="move">
+<label>Move to<select name="collection"><option value=""${cur ? '' : ' selected'}>No collection</option>${options}</select></label>
+<label>Or a new path<input name="new" placeholder="team/project"></label>
+<button>Move</button><p class="hint">A new path makes a new collection: 1 to 4 parts split by /.</p></form>
+<dialog class="pick" aria-label="Move to a collection">
+<form method="post" action="${self}"><input type="hidden" name="action" value="move">
+<div class="ph"><input class="flt" type="text" autocomplete="off" spellcheck="false" placeholder="Filter, or type a new path"
+ role="combobox" aria-expanded="true" aria-controls="mvl" aria-label="Filter collections, or type a new path">
+<button type="button" class="ic x" aria-label="Close" title="Close">${ICON.x}</button></div>
+<div id="mvl" class="opts" role="listbox" aria-label="Collections">
+${collections.map(opt).join('\n')}
+<button id="mvnone" role="option" name="collection" value="" class="none" data-k=""${cur ? '' : ' disabled aria-disabled="true"'}><span class="p">No collection</span>${
+    cur ? '' : '<span class="tag">current</span>'}</button>
+<button id="mvnew" role="option" name="collection" value="" class="new" hidden>Create <span class="p"></span></button>
+</div>
+<p class="hint" id="mvh" aria-live="polite"></p>
+</form></dialog>
+</div>
+<script>
+(function () {
+  var root = document.getElementById('mv'), d = root.querySelector('dialog'), f = d.querySelector('.flt')
+  var all = [].slice.call(d.querySelectorAll('[role=option]')), add = d.querySelector('#mvnew'), hint = d.querySelector('#mvh')
+  var paths = all.filter(function (b) { return b !== add }).map(function (b) { return b.value })
+  var rule = /^[a-z0-9][a-z0-9._-]{0,63}(\\/[a-z0-9][a-z0-9._-]{0,63}){0,3}$/, act = null
+  root.classList.add('js')
+  function shown() { return all.filter(function (b) { return !b.hidden && !b.disabled }) }
+  function mark(b) {
+    if (act) act.classList.remove('on')
+    act = b || null
+    if (act) { act.classList.add('on'); act.scrollIntoView({ block: 'nearest' }); f.setAttribute('aria-activedescendant', act.id) }
+    else f.removeAttribute('aria-activedescendant')
+  }
+  function filter() {
+    var q = f.value.trim().toLowerCase(), p = q.replace(/^\\/+|\\/+$/g, '')
+    all.forEach(function (b) { if (b !== add) b.hidden = !!q && b.getAttribute('data-k').indexOf(q) < 0 && !(b.id === 'mvnone' && 'no collection'.indexOf(q) >= 0) })
+    var fresh = !!p && rule.test(p) && paths.indexOf(p) < 0
+    add.hidden = !fresh; add.value = p; add.querySelector('.p').textContent = p
+    hint.textContent = p && !fresh && paths.indexOf(p) < 0 ? 'A path is 1 to 4 parts of a-z, 0-9, dot, dash or underscore, split by /.' : ''
+    var s = shown(); mark(fresh && s.length === 1 ? add : s[0])
+  }
+  root.querySelector('.mvb').addEventListener('click', function () { f.value = ''; filter(); d.showModal(); f.focus() })
+  d.querySelector('.x').addEventListener('click', function () { d.close() })
+  d.addEventListener('click', function (e) { if (e.target === d) d.close() })
+  f.addEventListener('input', filter)
+  f.addEventListener('keydown', function (e) {
+    var s = shown(), i = s.indexOf(act)
+    if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+      e.preventDefault()
+      if (s.length) mark(s[(i + (e.key === 'ArrowDown' ? 1 : s.length - 1)) % s.length])
+    } else if (e.key === 'Enter') {
+      e.preventDefault()
+      if (act) act.click()
+    }
+  })
+  all.forEach(function (b) { b.addEventListener('mousemove', function () { if (!b.disabled && act !== b) mark(b) }) })
+})()
+</script>`
 }
 
 // POST /_s/<slug>: the forms of the share page. The caller checks the
@@ -196,9 +281,14 @@ export async function managePost(req: Request, url: URL, env: Env, store: ShareS
 
   try {
     switch (field('action')) {
-      case 'attrs':
-        await store.setAttrs(slug, { title: field('title') || null, collection: field('collection') || null }, email)
+      case 'title':
+        await store.setAttrs(slug, { title: field('title') || null }, email)
         return back()
+      case 'move': {
+        const to = (field('new') || field('collection')).toLowerCase().replace(/^\/+|\/+$/g, '') || null
+        await store.setAttrs(slug, { collection: to }, email)
+        return back(`/_s/${encodeURIComponent(slug)}?moved`)
+      }
       case 'rename': {
         const to = field('to')
         await store.rename(slug, to, email)
