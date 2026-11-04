@@ -6,7 +6,8 @@ import { isQueryStore, type ShareStore, type ShareSummary } from '../store'
 import type { ShareInfo } from '../api-types'
 import { contentBase, hostKind } from '../origins'
 import { approvePage, tokenPage } from './tokens'
-import { STYLE, collectionsPage, nav, sharePage } from './manage'
+import { collectionsPage, sharePage } from './manage'
+import { ICON, STYLE, copyLink, iconLink, nav, person, recency, when } from './shell'
 
 const summary = (s: ShareInfo): [string, ShareSummary] =>
   [s.slug, { n: s.fileCount, t: s.updatedAt, o: s.owner, ...(s.title ? { title: s.title } : {}) }]
@@ -56,41 +57,27 @@ export async function serve(url: URL, email: string | null, env: Env, store: Sha
       return `<td class="v" title="${esc(who)}">${n} viewer${n === 1 ? '' : 's'}</td>`
     }
     const rows = sorted.map(([p, s]) =>
-      `<tr data-p="/${esc(p)}/"><td class="s"><a href="${content}/${esc(p)}/">${esc(p)}</a>${
-        s.title ? ` <span class="ti">${esc(s.title)}</span>` : ''}${
-        s.pub ? ' <span class="pub" title="opens without login">public</span>' : ''}</td>${
-        owners ? `<td class="o">${esc((s.o || env.ADMIN_EMAIL).split('@')[0])}</td>` : ''
+      `<tr data-p="/${esc(p)}/"><td class="s"><a class="nm" href="${content}/${esc(p)}/">${
+        s.title ? `<span class="ti">${esc(s.title)}</span>` : ''}<span class="slug">${esc(p)}</span></a>${
+        s.pub ? '<span class="pub" title="opens without login">public</span>' : ''}</td>${
+        owners ? `<td class="o">${person(s.o || env.ADMIN_EMAIL)}</td>` : ''
       }<td class="n">${s.n} file${
-        s.n === 1 ? '' : 's'}</td>${viewCell(p)}<td class="t" title="${
+        s.n === 1 ? '' : 's'}</td>${viewCell(p)}<td class="t ${s.t ? recency(s.t) : 'old'}" title="${
         s.t ? new Date(s.t).toISOString() : 'published before timestamps existed'}">${
-        ago(s.t)}</td><td><button data-u="${content}/${esc(p)}/">url</button>${
-        query ? ` <a class="mg" href="/_s/${encodeURIComponent(p)}" title="versions, diffs, rename, delete">manage</a>` : ''}</td></tr>`)
-    return page('shares', `<style>
-  .hd h1{margin:0 0 .5rem;font-size:1.3rem}
-  #q{width:100%;box-sizing:border-box;font:inherit;font-size:.9rem;padding:.35em .6em;
+        ago(s.t)}</td><td class="acts">${copyLink(`${content}/${p}/`)}${
+        query ? ` ${iconLink(`/_s/${encodeURIComponent(p)}`, 'gear', 'Settings')}` : ''}</td></tr>`)
+    const head = `<thead><tr><th>Share</th>${owners ? '<th>Owner</th>' : ''}<th class="r">Files</th><th class="r">Viewers</th><th>Updated</th><th></th></tr></thead>`
+    // admin scope toggle; the search text stays across the switch
+    const qs = q ? `q=${encodeURIComponent(q)}` : ''
+    const scope = isAdmin && !c
+      ? `<div class="scope" role="group" aria-label="Scope"><a href="/?mine${qs ? `&${qs}` : ''}"${admin ? '' : ' class="on" aria-current="true"'}>Mine</a><a href="/${qs ? `?${qs}` : ''}"${admin ? ' class="on" aria-current="true"' : ''}>Everyone</a></div>`
+      : ''
+    const title = c ? `Collection <code>${esc(c)}</code>` : q ? 'Search' : admin ? 'Shares' : 'My shares'
+    return page(c ? 'Collection' : q ? 'Search' : admin ? 'Shares' : 'My shares', `<style>
+  #q{width:100%;box-sizing:border-box;font:inherit;font-size:.9rem;padding:.5rem .75rem;
     background:var(--code-bg);color:var(--fg);border:1px solid var(--border);
     border-radius:6px;margin:0 0 .75rem}
   #q:focus{outline:2px solid var(--link);outline-offset:-1px}
-  table.lst{display:table;width:100%;min-width:0;max-width:none;left:auto;transform:none;
-    background:none;padding:0;font-size:.9rem}
-  .lst td{border:0;border-bottom:1px solid var(--border);padding:.3em .4em;white-space:nowrap}
-  .lst td.s{width:100%;white-space:normal}
-  .lst td.s a{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:.85rem;
-    text-decoration:none}
-  .lst td.s a:hover{text-decoration:underline}
-  .lst .ti{color:var(--muted);font-size:.8rem}
-  .lst a.mg{font-size:.7rem;color:var(--muted);text-decoration:none;border:1px solid var(--border);
-    border-radius:5px;padding:.05em .45em}
-  .lst a.mg:hover{color:var(--fg);border-color:var(--muted)}
-  .lst .pub{font-size:.7rem;color:var(--acc2);border:1px solid var(--acc2);border-radius:5px;
-    padding:0 .35em}
-  .lst td.o{color:var(--muted)}
-  .lst td.n{color:var(--acc1);text-align:right}
-  .lst td.v{color:var(--muted);text-align:right;cursor:default}
-  .lst td.t{color:var(--acc2)}
-  .lst button{font:inherit;font-size:.7rem;color:var(--muted);background:none;
-    border:1px solid var(--border);border-radius:5px;padding:.05em .45em;cursor:pointer}
-  .lst button:hover{color:var(--fg);border-color:var(--muted)}
   #pv{display:none;position:fixed;z-index:10;max-width:44rem;max-height:45vh;overflow:hidden;
     background:var(--code-bg);border:1px solid var(--border);border-radius:6px;
     box-shadow:0 4px 16px rgba(0,0,0,.25);padding:.5rem .75rem}
@@ -99,23 +86,21 @@ export async function serve(url: URL, email: string | null, env: Env, store: Sha
   #pv::after{content:'';position:absolute;left:0;right:0;bottom:-14px;height:14px}
   #pv .f{color:var(--muted);font-size:.75rem;margin:0 3.5rem .25rem 0;
     font-family:ui-monospace,SFMono-Regular,Menlo,monospace}
-  #pv .c{position:absolute;top:.35rem;right:.4rem;font:inherit;font-size:.7rem;
-    color:var(--muted);background:none;border:1px solid var(--border);border-radius:5px;
-    padding:.05em .45em;cursor:pointer}
+  #pv .c{position:absolute;top:.35rem;right:.4rem;display:flex;color:var(--muted);background:none;
+    border:1px solid var(--border);border-radius:5px;padding:.2rem;cursor:pointer}
+  #pv .c svg{width:14px;height:14px}
+  #pv .c:focus-visible{outline:2px solid var(--link);outline-offset:2px}
   #pv .c:hover{color:var(--fg);border-color:var(--muted)}
   #pv pre{margin:0;padding:0;background:none;min-width:0;width:auto;left:0;transform:none;
     max-width:none;font-size:.75rem;line-height:1.4;white-space:pre-wrap;overflow:hidden}
 </style>
-${STYLE}<div class="app">${nav(email!, env)}</div>
-<div class="hd"><h1>${c ? `collection <code>${esc(c)}</code>` : q ? 'search' : 'shares'}</h1></div>
+${STYLE}<div class="app">${nav(email!, env, 'shares')}
+<div class="hd"><h1>${title}</h1>${scope}</div>
 <form method="get" action="/">${admin ? '' : isAdmin ? '<input type="hidden" name="mine" value="">' : ''}
-<input id="q" name="q" value="${esc(q)}" placeholder="${query ? 'filter; enter searches titles, files and metadata' : 'filter'}" autofocus></form>
-<table class="lst"><tbody id="shares">${rows.join('')}</tbody></table>
-${rows.length ? '' : `<p>${q || c ? 'No match.' : 'No shares yet.'}</p>`}
-<p><small>${q || c ? '<a href="/">all shares</a>' : ''}${
-  isAdmin && !c
-    ? `${q ? ' · ' : ''}${admin ? `<a href="/?mine${q ? `&q=${encodeURIComponent(q)}` : ''}">mine only</a>` : `<a href="/${q ? `?q=${encodeURIComponent(q)}` : ''}">everyone</a>`}`
-    : ''}</small></p>
+<input id="q" name="q" value="${esc(q)}" placeholder="Search shares" aria-label="Search shares" autofocus></form>
+${rows.length ? `<div class="scroll"><table class="lst">${head}<tbody id="shares">${rows.join('')}</tbody></table></div>` : `<p class="sub">${q || c ? 'No match.' : 'No shares yet.'}</p>`}
+${q || c ? '<p><small><a href="/">All shares</a></small></p>' : ''}
+</div>
 <script>
 document.getElementById('q').addEventListener('input', function () {
   var q = this.value.toLowerCase()
@@ -123,16 +108,9 @@ document.getElementById('q').addEventListener('input', function () {
     tr.style.display = tr.textContent.toLowerCase().indexOf(q) === -1 ? 'none' : ''
   })
 })
-document.querySelectorAll('.lst button').forEach(function (b) {
-  b.addEventListener('click', function () {
-    navigator.clipboard.writeText(new URL(b.getAttribute('data-u'), location.href).href).then(function () {
-      b.textContent = 'ok'; setTimeout(function () { b.textContent = 'url' }, 900)
-    })
-  })
-})
 var pv = document.createElement('div')
 pv.id = 'pv'
-pv.innerHTML = '<div class="f"></div><button class="c">copy</button><pre></pre>'
+pv.innerHTML = '<div class="f"></div><button type="button" class="c" aria-label="Copy" title="Copy">${ICON.copy}</button><pre></pre>'
 document.body.appendChild(pv)
 var pvCache = {}, pvHide = null, pvCur = null
 function hidePv() { pv.style.display = 'none'; pvCur = null }
@@ -149,10 +127,7 @@ pv.querySelector('.c').addEventListener('click', function () {
   fetch(pv.dataset.u + '_peek?full', { cache: 'no-store' })
     .then(function (r) { return r.json() })
     .then(function (j) { return navigator.clipboard.writeText(j.text) })
-    .then(function () {
-      b.textContent = 'copied'; setTimeout(function () { b.textContent = 'copy' }, 1000)
-    })
-    .catch(function () {})
+    .then(function () { appToast('Copied') }, function () { appToast('Could not copy') })
 })
 document.querySelectorAll('#shares tr').forEach(function (tr) {
   var u = tr.getAttribute('data-p')
@@ -213,11 +188,11 @@ pvPump()
     const bar = (n: number, max: number) => '█'.repeat(n && Math.max(1, Math.round(n / max * 30)))
     const maxS = Math.max(1, ...rows.map(([, b]) => b.shares))
     const maxP = Math.max(1, ...rows.map(([, b]) => b.pushes))
-    return page('stats', `${STYLE}<div class="app">${nav(email, env)}</div><h1>stats</h1>
-<table><tr><th>owner</th><th>shares</th><th></th><th>files</th><th>pushes</th><th></th></tr>${rows.map(([o, b]) =>
-  `<tr><td>${esc(o.split('@')[0])}</td><td>${b.shares}</td><td>${bar(b.shares, maxS)}</td>
-<td>${b.files}</td><td>${b.pushes}</td><td>${bar(b.pushes, maxP)}</td></tr>`).join('')}</table>
-<p><small>pushes counted since the counter was added</small></p>${await auditTable(store)}`,
+    return page('Activity', `${STYLE}<div class="app">${nav(email, env, 'activity')}<h1>Activity</h1>
+<div class="scroll"><table class="auto"><tr><th>Owner</th><th class="r">Shares</th><th></th><th class="r">Files</th><th class="r">Pushes</th><th></th></tr>${rows.map(([o, b]) =>
+  `<tr><td>${person(o)}</td><td class="r">${b.shares}</td><td>${bar(b.shares, maxS)}</td>
+<td class="r">${b.files}</td><td class="r">${b.pushes}</td><td>${bar(b.pushes, maxP)}</td></tr>`).join('')}</table></div>
+<p><small>Pushes are counted since the counter was added.</small></p>${await auditTable(store)}</div>`,
     { poll: false })
   }
 
@@ -311,10 +286,10 @@ pvPump()
 // newest audit rows (admin stats page); empty on stores without a log
 async function auditTable(store: ShareStore) {
   if (!store.audit) return ''
-  const rows = (await store.audit(100)).map((a) => `<tr><td title="${new Date(a.at).toISOString()}">${ago(a.at)}</td>
-<td>${esc(a.actor)}</td><td>${esc(a.action)}</td><td class="w mono">${a.share
+  const rows = (await store.audit(100)).map((a) => `<tr><td class="t">${when(a.at)}</td>
+<td class="o">${person(a.actor, true)}</td><td><span class="tag">${esc(a.action)}</span></td><td class="s mono">${a.share
     ? `<a href="/_s/${encodeURIComponent(a.share)}">${esc(a.share)}</a>` : ''}</td></tr>`)
-  return `<div class="app"><h2>audit log</h2>${rows.length
-    ? `<table><tr><th>when</th><th>actor</th><th>action</th><th>share</th></tr>${rows.join('')}</table>`
-    : '<p class="sub">no rows yet</p>'}</div>`
+  return `<h2>Audit log</h2>${rows.length
+    ? `<div class="scroll"><table class="lst"><thead><tr><th>When</th><th>Actor</th><th>Action</th><th>Share</th></tr></thead><tbody>${rows.join('')}</tbody></table></div>`
+    : '<p class="sub">No rows yet.</p>'}`
 }

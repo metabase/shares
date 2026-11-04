@@ -64,6 +64,30 @@ describe('line diff', () => {
   })
 })
 
+describe('app nav', () => {
+  it('marks the current page and shows Activity to the admin only', async () => {
+    const member = (await text('/_collections', OTHER)).body
+    expect(member).toContain('<a href="/_collections" class="on" aria-current="page">Collections</a>')
+    expect(member).toContain('<a href="/_token">Install</a>')
+    expect(member).not.toContain('Activity')
+    expect(member).toContain('<select data-thm')
+    const admin = (await text('/_stats', ADMIN)).body
+    expect(admin).toContain('<a href="/_stats" class="on" aria-current="page">Activity</a>')
+    expect(admin).toContain('<a href="/">Shares</a>')
+  })
+
+  it('titles the list "My shares" for a member and gives the admin a Mine / Everyone toggle that keeps the search', async () => {
+    const member = (await text('/', OTHER)).body
+    expect(member).toContain('<h1>My shares</h1>')
+    expect(member).not.toContain('class="scope"')
+    const every = (await text('/?q=zebra', ADMIN)).body
+    expect(every).toContain('<a href="/?mine&q=zebra">Mine</a><a href="/?q=zebra" class="on" aria-current="true">Everyone</a>')
+    const mine = (await text('/?mine', ADMIN)).body
+    expect(mine).toContain('<h1>My shares</h1>')
+    expect(mine).toContain('<a href="/?mine" class="on" aria-current="true">Mine</a><a href="/">Everyone</a>')
+  })
+})
+
 describe('web app', () => {
   it('finds a share by a word of a file path, title or metadata, only among your own', async () => {
     const t = await userToken(OWNER)
@@ -107,8 +131,24 @@ describe('web app', () => {
     expect(d).toContain('3 of 3 files differ')
     expect(d).toContain('<span class="d-del">- two</span>')
     expect(d).toContain('<span class="d-add">+ TWO</span>')
-    expect(d).toMatch(/gone\.txt<\/b> <span class="tag">removed/)
-    expect(d).toMatch(/new\.txt<\/b> <span class="tag">added/)
+    expect(d).toMatch(/gone\.txt<\/b> <span class="tag removed">removed/)
+    expect(d).toMatch(/new\.txt<\/b> <span class="tag added">added/)
+  })
+
+  it('gives the list rows and the share page header icon buttons with a label, one toast and the link favicon', async () => {
+    const t = await userToken(OWNER)
+    const top = slug('ic')
+    await commit(top, { 'a.md': 'a' }, t)
+    const list = (await text('/')).body
+    expect(list).toMatch(new RegExp(`class="ic cp" data-u="[^"]*/${top}/" aria-label="Copy link" title="Copy link"><svg`))
+    expect(list).toContain(`href="/_s/${top}" aria-label="Settings" title="Settings"><svg`)
+    expect(list.match(/id="toast" role="status" aria-live="polite"/g)).toHaveLength(1)
+    expect(list).toContain('<link rel="icon" href="data:image/svg+xml,')
+    expect(list).toContain(encodeURIComponent('🔗'))
+    const sh = (await text(`/_s/${top}`)).body
+    expect(sh).toContain('aria-label="Copy link"')
+    expect(sh).toMatch(/href="[^"]*_zip" aria-label="Download zip" title="Download zip"><svg/)
+    expect(sh).toMatch(/class="btn pri" href="[^"]*">Open<\/a>/)
   })
 
   it('shows the manage forms and views to the owner only', async () => {
@@ -119,7 +159,7 @@ describe('web app', () => {
     const other = await text(`/_s/${top}`, OTHER)
     expect(other.status).toBe(200)
     expect(other.body).not.toContain('value="delete"')
-    expect(other.body).not.toContain('<h2>views</h2>')
+    expect(other.body).not.toContain('<h2>Views</h2>')
   })
 
   it('deletes a share after the slug is typed, with an audit row', async () => {
@@ -180,17 +220,74 @@ describe('web app', () => {
     expect((await text('/?q=xfer', OTHER)).body).toContain(`/_s/${top}`)
   })
 
-  it('sets the title and collection, and an empty field clears them', async () => {
+  it('sets the title on its own form, and an empty title clears it', async () => {
     const t = await userToken(OWNER)
     const top = slug('attr')
-    await commit(top, { 'a.md': 'a' }, t)
-    expect((await submit(top, { action: 'attrs', title: 'Narwhal notes', collection: 'notes/x' })).status).toBe(303)
+    await commit(top, { 'a.md': 'a' }, t, { collection: 'notes/x' })
+    expect((await submit(top, { action: 'title', title: 'Narwhal notes' })).status).toBe(303)
     let info = await (await api('GET', `/_api/shares/${top}`, { token: t })).json() as any
     expect(info).toMatchObject({ title: 'Narwhal notes', collection: 'notes/x' })
     expect((await text('/?q=narwhal')).body).toContain(`/_s/${top}`)
-    await submit(top, { action: 'attrs', title: '', collection: '' })
+    await submit(top, { action: 'title', title: '' })
     info = await (await api('GET', `/_api/shares/${top}`, { token: t })).json() as any
-    expect(info).toMatchObject({ title: null, collection: null })
+    expect(info).toMatchObject({ title: null, collection: 'notes/x' })
+  })
+
+  it('moves a share to a collection of another owner, to a new path, and out of its collection', async () => {
+    const t = await userToken(OWNER)
+    const top = slug('mv')
+    await commit(top, { 'a.md': 'a' }, t)
+    await commit(slug('mvo'), { 'a.md': 'a' }, await userToken(OTHER), { collection: 'theirs/x' })
+    const get = async () => (await (await api('GET', `/_api/shares/${top}`, { token: t })).json() as any).collection
+
+    const r = await submit(top, { action: 'move', collection: 'theirs/x', new: '' })
+    expect(r.status).toBe(303)
+    expect(r.headers.get('location')).toBe(`/_s/${top}?moved`)
+    expect(await get()).toBe('theirs/x')
+    expect((await (await api('GET', '/_api/collections/theirs/x', { token: t })).json() as any).owner).toBe(OTHER)
+
+    expect((await submit(top, { action: 'move', collection: 'theirs/x', new: '/Mine/New/' })).status).toBe(303)
+    expect(await get()).toBe('mine/new')
+    expect((await (await api('GET', '/_api/collections/mine/new', { token: t })).json() as any).owner).toBe(OWNER)
+
+    expect((await submit(top, { action: 'move', new: 'a/b/c/d/e' })).status).toBe(400)
+    expect((await submit(top, { action: 'move', collection: 'theirs/x' }, OTHER)).status).toBe(403)
+    expect(await get()).toBe('mine/new')
+
+    await submit(top, { action: 'move', collection: '' })
+    expect(await get()).toBe(null)
+  })
+
+  it('shows the collection as a chip with a picker and a no-JS form, and a notice after a move', async () => {
+    const t = await userToken(OWNER)
+    const top = slug('pk')
+    await commit(top, { 'a.md': 'a' }, t, { collection: 'pick/here' })
+    await commit(slug('pk2'), { 'a.md': 'a' }, t, { collection: 'pick/there' })
+    expect((await api('PUT', '/_api/collections/pick/there', { token: t, body: JSON.stringify({ title: 'There <b>' }) })).status).toBe(200)
+    const own = (await text(`/_s/${top}`)).body
+    expect(own).toContain('<span class="chip">pick/here</span>')
+    expect(own).toContain('<button type="button" class="mvb" aria-haspopup="dialog">Move</button>')
+    expect(own).toMatch(/<dialog class="pick"[^>]*>\s*<form method="post" action="[^"]+"><input type="hidden" name="action" value="move">/)
+    expect(own).toMatch(/role="option" name="collection" value="pick\/here" disabled[^>]*>[^]*?<span class="tag">current<\/span>/)
+    expect(own).toMatch(/value="pick\/there"\n data-k="pick\/there there &lt;b&gt;"><span class="p">pick\/there<\/span><span class="t">There &lt;b&gt;<\/span><span class="n">1 share<\/span>/)
+    expect(own).toContain('<option value="pick/here" selected>pick/here</option>')
+    expect(own).toContain('<label>Or a new path<input name="new"')
+    expect(own).not.toContain('Moved to')
+    const moved = (await text(`/_s/${top}?moved`)).body
+    expect(moved).toContain('<noscript><p class="moved" role="status">Moved to pick/here</p></noscript>')
+    expect(moved).toContain('appToast("Moved to pick/here", 3000)')
+    expect((await text(`/_s/${top}`, OTHER)).body).not.toContain('class="pick"')
+  })
+
+  it('shows the slug under its collection, and the edit-access hint to the owner only', async () => {
+    const t = await userToken(OWNER)
+    const top = slug('head')
+    await commit(top, { 'a.md': 'a' }, t, { collection: 'notes/y' })
+    const own = (await text(`/_s/${top}`)).body
+    expect(own).toContain(`<p class="slugline"><a href="/?c=notes%2Fy">notes/y</a> / ${top}</p>`)
+    expect(own).toContain('You lose edit access.')
+    expect(own).toMatch(/<p class="dzh">Delete share<\/p>\s*<form method="post" action="[^"]+" class="dz">/)
+    expect((await text(`/_s/${top}`, ADMIN)).body).not.toContain('You lose edit access.')
   })
 
   it('shows the audit log on the stats page to the admin', async () => {
@@ -206,7 +303,7 @@ describe('web app', () => {
   it('lets the admin create, list and revoke service tokens on the token page', async () => {
     const name = slug('bot').toLowerCase()
     expect((await formAt('/_token', { action: 'service-create', name, scopes: 'write:x/*' }, OWNER)).status).toBe(403)
-    expect((await text('/_token', OWNER)).body).not.toContain('service tokens')
+    expect((await text('/_token', OWNER)).body).not.toContain('Service tokens')
     const bad = await formAt('/_token', { action: 'service-create', name, scopes: 'nope' }, ADMIN)
     expect(bad.status).toBe(400)
     expect(await bad.text()).toContain('bad scopes')

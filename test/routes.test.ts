@@ -77,6 +77,14 @@ describe('publish and read', () => {
     expect(await raw.text()).toBe('{"k":1}')
   })
 
+  it('gives rendered share pages the link favicon and serves raw html as published', async () => {
+    const top = slug('fav')
+    const own = '<!doctype html><link rel="icon" href="own.png"><p>hi</p>'
+    await publish(top, { 'index.md': '# T', 'p.html': own })
+    expect(await (await browse(`/${top}/`)).text()).toContain('<link rel="icon" href="data:image/svg+xml,')
+    expect(await (await browse(`/${top}/p.html`)).text()).toBe(own)
+  })
+
   it('redirects a bare slug and a subdirectory to their trailing-slash form', async () => {
     const top = slug('dirs')
     await publish(top, { 'a.txt': 'a', 'sub/b.txt': 'b' })
