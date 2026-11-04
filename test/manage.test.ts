@@ -64,6 +64,30 @@ describe('line diff', () => {
   })
 })
 
+describe('app nav', () => {
+  it('marks the current page and shows Activity to the admin only', async () => {
+    const member = (await text('/_collections', OTHER)).body
+    expect(member).toContain('<a href="/_collections" class="on" aria-current="page">Collections</a>')
+    expect(member).toContain('<a href="/_token">Install</a>')
+    expect(member).not.toContain('Activity')
+    expect(member).toContain('<select data-thm')
+    const admin = (await text('/_stats', ADMIN)).body
+    expect(admin).toContain('<a href="/_stats" class="on" aria-current="page">Activity</a>')
+    expect(admin).toContain('<a href="/">Shares</a>')
+  })
+
+  it('titles the list "My shares" for a member and gives the admin a Mine / Everyone toggle that keeps the search', async () => {
+    const member = (await text('/', OTHER)).body
+    expect(member).toContain('<h1>My shares</h1>')
+    expect(member).not.toContain('class="scope"')
+    const every = (await text('/?q=zebra', ADMIN)).body
+    expect(every).toContain('<a href="/?mine&q=zebra">Mine</a><a href="/?q=zebra" class="on" aria-current="true">Everyone</a>')
+    const mine = (await text('/?mine', ADMIN)).body
+    expect(mine).toContain('<h1>My shares</h1>')
+    expect(mine).toContain('<a href="/?mine" class="on" aria-current="true">Mine</a><a href="/">Everyone</a>')
+  })
+})
+
 describe('web app', () => {
   it('finds a share by a word of a file path, title or metadata, only among your own', async () => {
     const t = await userToken(OWNER)
@@ -119,7 +143,7 @@ describe('web app', () => {
     const other = await text(`/_s/${top}`, OTHER)
     expect(other.status).toBe(200)
     expect(other.body).not.toContain('value="delete"')
-    expect(other.body).not.toContain('<h2>views</h2>')
+    expect(other.body).not.toContain('<h2>Views</h2>')
   })
 
   it('deletes a share after the slug is typed, with an audit row', async () => {
@@ -193,6 +217,17 @@ describe('web app', () => {
     expect(info).toMatchObject({ title: null, collection: null })
   })
 
+  it('shows the slug under its collection, and the edit-access hint to the owner only', async () => {
+    const t = await userToken(OWNER)
+    const top = slug('head')
+    await commit(top, { 'a.md': 'a' }, t, { collection: 'notes/y' })
+    const own = (await text(`/_s/${top}`)).body
+    expect(own).toContain(`<p class="slugline"><a href="/?c=notes%2Fy">notes/y</a> / ${top}</p>`)
+    expect(own).toContain('You lose edit access.')
+    expect(own).toMatch(/<p class="dzh">Delete share<\/p>\s*<form method="post" action="[^"]+" class="dz">/)
+    expect((await text(`/_s/${top}`, ADMIN)).body).not.toContain('You lose edit access.')
+  })
+
   it('shows the audit log on the stats page to the admin', async () => {
     const t = await userToken(OWNER)
     const top = slug('aud')
@@ -206,7 +241,7 @@ describe('web app', () => {
   it('lets the admin create, list and revoke service tokens on the token page', async () => {
     const name = slug('bot').toLowerCase()
     expect((await formAt('/_token', { action: 'service-create', name, scopes: 'write:x/*' }, OWNER)).status).toBe(403)
-    expect((await text('/_token', OWNER)).body).not.toContain('service tokens')
+    expect((await text('/_token', OWNER)).body).not.toContain('Service tokens')
     const bad = await formAt('/_token', { action: 'service-create', name, scopes: 'nope' }, ADMIN)
     expect(bad.status).toBe(400)
     expect(await bad.text()).toContain('bad scopes')

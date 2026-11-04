@@ -32,16 +32,16 @@ export function page(title: string, body: string, opts: PageOpts = {}) {
 <script>try{var _t=localStorage.getItem('theme');if(_t)document.documentElement.setAttribute('data-theme',_t)}catch(e){}</script>
 <style>
   :root{--bg:#fff;--fg:#1f2328;--muted:#59636e;--link:#0969da;--border:#d1d9e0;
-    --code-bg:#f6f8fa;--acc1:#953800;--acc2:#1a7f37;--target:#fff8c5}
+    --code-bg:#f6f8fa;--acc1:#953800;--acc2:#1a7f37;--target:#fff8c5;--danger:#cf222e;--hover:#f3f5f7}
   @media (prefers-color-scheme: dark){:root:not([data-theme=light]){--bg:#0d1117;--fg:#e6edf3;
     --muted:#8b949e;--link:#4493f8;--border:#30363d;--code-bg:#161b22;
-    --acc1:#ffa657;--acc2:#7ee787;--target:#3a3000}}
+    --acc1:#ffa657;--acc2:#7ee787;--target:#3a3000;--danger:#f85149;--hover:#161b22}}
   :root[data-theme=dark]{--bg:#0d1117;--fg:#e6edf3;--muted:#8b949e;--link:#4493f8;
-    --border:#30363d;--code-bg:#161b22;--acc1:#ffa657;--acc2:#7ee787;--target:#3a3000}
-  :root[data-theme=tokyo]{--bg:#1a1b26;--fg:#c0caf5;--muted:#565f89;--link:#7aa2f7;
-    --border:#292e42;--code-bg:#16161e;--acc1:#ff9e64;--acc2:#9ece6a;--target:#33301f}
+    --border:#30363d;--code-bg:#161b22;--acc1:#ffa657;--acc2:#7ee787;--target:#3a3000;--danger:#f85149;--hover:#161b22}
+  :root[data-theme=tokyo]{--bg:#1a1b26;--fg:#c0caf5;--muted:#787fa8;--link:#7aa2f7;
+    --border:#292e42;--code-bg:#16161e;--acc1:#ff9e64;--acc2:#9ece6a;--target:#33301f;--danger:#f7768e;--hover:#1f2335}
   :root[data-theme=nord]{--bg:#2e3440;--fg:#d8dee9;--muted:#8492ab;--link:#88c0d0;
-    --border:#3b4252;--code-bg:#3b4252;--acc1:#d08770;--acc2:#a3be8c;--target:#4c566a}
+    --border:#3b4252;--code-bg:#3b4252;--acc1:#d08770;--acc2:#a3be8c;--target:#4c566a;--danger:#bf616a;--hover:#353c4a}
   body{max-width:42rem;margin:2rem auto;padding:0 1rem;font:16px/1.6 -apple-system,system-ui,sans-serif;
     background:var(--bg);color:var(--fg)}
   /* pre/table break out of the 42rem prose column: as wide as content needs,
@@ -141,14 +141,19 @@ ${opts.slug ? `<footer><small>clone this share: <code>share download ${esc(opts.
   })
   document.querySelectorAll('pre').forEach(function (pre) {
     if (pre.closest('#pv')) return
+    // a pre in a .cb wrapper (app pages) gets its button in the top right
+    // corner of the block, with sentence case labels
+    var cb = pre.parentElement.classList.contains('cb')
+    var label = cb ? 'Copy' : 'copy'
     var b = document.createElement('button')
-    b.textContent = 'copy'; b.className = 'copy'
+    b.textContent = label; b.className = cb ? 'copy sm' : 'copy'
     b.onclick = function () {
       navigator.clipboard.writeText(pre.textContent).then(function () {
-        b.textContent = 'copied'
-        setTimeout(function () { b.textContent = 'copy' }, 1200)
+        b.textContent = cb ? 'Copied' : 'copied'
+        setTimeout(function () { b.textContent = label }, 1200)
       })
     }
+    if (cb) return pre.insertAdjacentElement('beforebegin', b)
     // diagram fences also get an "open on" link to the language's own
     // editor, source carried in the URL fragment (never sent to a server)
     var lang = pre.querySelector('code.language-mermaid') ? 'mermaid'
@@ -247,21 +252,25 @@ ${opts.slug ? `<footer><small>clone this share: <code>share download ${esc(opts.
     }).catch(function () { rdRender(c, i + 1) })
   }
   rds.forEach(function (c) { rdRender(c, 0) })
-  // theme picker: fixed bottom-right on every rendered page
-  var tsel = document.createElement('select')
-  tsel.id = 'thg'; tsel.title = 'theme'
-  ;['auto', 'light', 'dark', 'tokyo', 'nord'].forEach(function (o) {
-    var op = document.createElement('option')
-    op.value = o === 'auto' ? '' : o
-    op.textContent = o
-    tsel.appendChild(op)
-  })
+  // theme picker: the app nav has its own; other pages get a fixed one
+  // in the bottom-right corner
+  var tsel = document.querySelector('select[data-thm]')
+  if (!tsel) {
+    tsel = document.createElement('select')
+    tsel.id = 'thg'; tsel.title = 'theme'
+    ;['auto', 'light', 'dark', 'tokyo', 'nord'].forEach(function (o) {
+      var op = document.createElement('option')
+      op.value = o === 'auto' ? '' : o
+      op.textContent = o
+      tsel.appendChild(op)
+    })
+    document.body.appendChild(tsel)
+  }
   tsel.value = tname
   tsel.addEventListener('change', function () {
     try { localStorage.setItem('theme', tsel.value) } catch (e) {}
     location.reload()
   })
-  document.body.appendChild(tsel)
   // top-right copy: fetch() gets raw bytes via Accept negotiation, so this
   // copies the true file content even on pretty-rendered pages
   var cp = document.getElementById('cpall')
@@ -301,16 +310,22 @@ ${opts.slug ? `<footer><small>clone this share: <code>share download ${esc(opts.
 
 export const notFound = () => page('not found', '<h1>404</h1>')
 
-export function ago(t: number) {
+const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec']
+
+// short relative time: "just now", "12m ago", "2h ago", "3d ago", then the
+// date ("Oct 28", with the year when it is not the current year). UTC.
+export function ago(t: number, now = Date.now()) {
   if (!t) return '—'
-  const m = Math.floor((Date.now() - t) / 60000)
+  const m = Math.floor((now - t) / 60000)
   if (m < 1) return 'just now'
-  if (m < 60) return `${m}min ago`
+  if (m < 60) return `${m}m ago`
   const h = Math.floor(m / 60)
-  if (h < 24) return `${h}hr ${m % 60}min ago`
+  if (h < 24) return `${h}h ago`
   const d = Math.floor(h / 24)
-  if (d < 7) return `${d}d ${h % 24}hr ago`
-  return new Date(t).toISOString().slice(0, 10)
+  if (d < 7) return `${d}d ago`
+  const at = new Date(t)
+  const day = `${MONTHS[at.getUTCMonth()]} ${at.getUTCDate()}`
+  return at.getUTCFullYear() === new Date(now).getUTCFullYear() ? day : `${day}, ${at.getUTCFullYear()}`
 }
 
 // Grammar hints for the <pre> page. Unknown text extensions still render,
