@@ -82,8 +82,8 @@ const TK_STYLE = `<style>
 const STYLE = APP_STYLE + TK_STYLE
 
 function status(t: TokenRow) {
-  if (t.revoked_at) return `Revoked ${when(t.revoked_at)}`
-  if (t.expires_at && t.expires_at <= Date.now()) return 'Expired'
+  if (t.revoked_at) return `<span class="tag">revoked</span> ${when(t.revoked_at)}`
+  if (t.expires_at && t.expires_at <= Date.now()) return '<span class="tag">expired</span>'
   return `Expires ${new Date(t.expires_at!).toISOString().slice(0, 10)}`
 }
 

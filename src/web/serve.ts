@@ -7,7 +7,7 @@ import type { ShareInfo } from '../api-types'
 import { contentBase, hostKind } from '../origins'
 import { approvePage, tokenPage } from './tokens'
 import { collectionsPage, sharePage } from './manage'
-import { ICON, STYLE, copyLink, iconLink, nav, when } from './shell'
+import { ICON, STYLE, copyLink, iconLink, nav, person, recency, when } from './shell'
 
 const summary = (s: ShareInfo): [string, ShareSummary] =>
   [s.slug, { n: s.fileCount, t: s.updatedAt, o: s.owner, ...(s.title ? { title: s.title } : {}) }]
@@ -60,9 +60,9 @@ export async function serve(url: URL, email: string | null, env: Env, store: Sha
       `<tr data-p="/${esc(p)}/"><td class="s"><a class="nm" href="${content}/${esc(p)}/">${
         s.title ? `<span class="ti">${esc(s.title)}</span>` : ''}<span class="slug">${esc(p)}</span></a>${
         s.pub ? '<span class="pub" title="opens without login">public</span>' : ''}</td>${
-        owners ? `<td class="o">${esc((s.o || env.ADMIN_EMAIL).split('@')[0])}</td>` : ''
+        owners ? `<td class="o">${person(s.o || env.ADMIN_EMAIL)}</td>` : ''
       }<td class="n">${s.n} file${
-        s.n === 1 ? '' : 's'}</td>${viewCell(p)}<td class="t" title="${
+        s.n === 1 ? '' : 's'}</td>${viewCell(p)}<td class="t ${s.t ? recency(s.t) : 'old'}" title="${
         s.t ? new Date(s.t).toISOString() : 'published before timestamps existed'}">${
         ago(s.t)}</td><td class="acts">${copyLink(`${content}/${p}/`)}${
         query ? ` ${iconLink(`/_s/${encodeURIComponent(p)}`, 'gear', 'Settings')}` : ''}</td></tr>`)
@@ -190,7 +190,7 @@ pvPump()
     const maxP = Math.max(1, ...rows.map(([, b]) => b.pushes))
     return page('Activity', `${STYLE}<div class="app">${nav(email, env, 'activity')}<h1>Activity</h1>
 <div class="scroll"><table class="auto"><tr><th>Owner</th><th class="r">Shares</th><th></th><th class="r">Files</th><th class="r">Pushes</th><th></th></tr>${rows.map(([o, b]) =>
-  `<tr><td>${esc(o.split('@')[0])}</td><td class="r">${b.shares}</td><td>${bar(b.shares, maxS)}</td>
+  `<tr><td>${person(o)}</td><td class="r">${b.shares}</td><td>${bar(b.shares, maxS)}</td>
 <td class="r">${b.files}</td><td class="r">${b.pushes}</td><td>${bar(b.pushes, maxP)}</td></tr>`).join('')}</table></div>
 <p><small>Pushes are counted since the counter was added.</small></p>${await auditTable(store)}</div>`,
     { poll: false })
@@ -287,7 +287,7 @@ pvPump()
 async function auditTable(store: ShareStore) {
   if (!store.audit) return ''
   const rows = (await store.audit(100)).map((a) => `<tr><td class="t">${when(a.at)}</td>
-<td class="o">${esc(a.actor)}</td><td><span class="tag">${esc(a.action)}</span></td><td class="s mono">${a.share
+<td class="o">${person(a.actor, true)}</td><td><span class="tag">${esc(a.action)}</span></td><td class="s mono">${a.share
     ? `<a href="/_s/${encodeURIComponent(a.share)}">${esc(a.share)}</a>` : ''}</td></tr>`)
   return `<h2>Audit log</h2>${rows.length
     ? `<div class="scroll"><table class="lst"><thead><tr><th>When</th><th>Actor</th><th>Action</th><th>Share</th></tr></thead><tbody>${rows.join('')}</tbody></table></div>`

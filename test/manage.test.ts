@@ -131,8 +131,8 @@ describe('web app', () => {
     expect(d).toContain('3 of 3 files differ')
     expect(d).toContain('<span class="d-del">- two</span>')
     expect(d).toContain('<span class="d-add">+ TWO</span>')
-    expect(d).toMatch(/gone\.txt<\/b> <span class="tag">removed/)
-    expect(d).toMatch(/new\.txt<\/b> <span class="tag">added/)
+    expect(d).toMatch(/gone\.txt<\/b> <span class="tag removed">removed/)
+    expect(d).toMatch(/new\.txt<\/b> <span class="tag added">added/)
   })
 
   it('gives the list rows and the share page header icon buttons with a label, one toast and the link favicon', async () => {

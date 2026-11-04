@@ -43,10 +43,10 @@ export function page(title: string, body: string, opts: PageOpts = {}) {
     --acc1:#ffa657;--acc2:#7ee787;--target:#3a3000;--danger:#f85149;--hover:#161b22}}
   :root[data-theme=dark]{--bg:#0d1117;--fg:#e6edf3;--muted:#8b949e;--link:#4493f8;
     --border:#30363d;--code-bg:#161b22;--acc1:#ffa657;--acc2:#7ee787;--target:#3a3000;--danger:#f85149;--hover:#161b22}
-  :root[data-theme=tokyo]{--bg:#1a1b26;--fg:#c0caf5;--muted:#787fa8;--link:#7aa2f7;
+  :root[data-theme=tokyo]{--bg:#1a1b26;--fg:#c0caf5;--muted:#848cb8;--link:#7aa2f7;
     --border:#292e42;--code-bg:#16161e;--acc1:#ff9e64;--acc2:#9ece6a;--target:#33301f;--danger:#f7768e;--hover:#1f2335}
-  :root[data-theme=nord]{--bg:#2e3440;--fg:#d8dee9;--muted:#8492ab;--link:#88c0d0;
-    --border:#3b4252;--code-bg:#3b4252;--acc1:#d08770;--acc2:#a3be8c;--target:#4c566a;--danger:#bf616a;--hover:#353c4a}
+  :root[data-theme=nord]{--bg:#2e3440;--fg:#d8dee9;--muted:#a2adc2;--link:#88c0d0;
+    --border:#3b4252;--code-bg:#3b4252;--acc1:#dc9580;--acc2:#a3be8c;--target:#4c566a;--danger:#de878f;--hover:#353c4a}
   body{max-width:42rem;margin:2rem auto;padding:0 1rem;font:16px/1.6 -apple-system,system-ui,sans-serif;
     background:var(--bg);color:var(--fg)}
   /* pre/table break out of the 42rem prose column: as wide as content needs,

@@ -5,10 +5,26 @@
 import type { Env } from '../env'
 import { ago, esc } from '../render/page'
 
+// Owner hues per theme: 7 hues, each 4.5:1 or more on the theme background
+// (the initial is in the background colour on the hue). No red: red means
+// danger.
+const HUES = {
+  light: ['#0969da', '#1a7f37', '#bc4c00', '#8250df', '#bf3989', '#1b7c83', '#9a6700'],
+  dark: ['#4493f8', '#3fb950', '#f0883e', '#a371f7', '#db61a2', '#39c5cf', '#d29922'],
+  tokyo: ['#7aa2f7', '#9ece6a', '#ff9e64', '#bb9af7', '#ff7ab2', '#7dcfff', '#e0af68'],
+  nord: ['#88c0d0', '#a3be8c', '#dc9580', '#c3a0bd', '#ebcb8b', '#8fbcbb', '#8eaccc'],
+} as const
+const vars = (hs: readonly string[]) => hs.map((h, i) => `--h${i}:${h}`).join(';')
+
 // Put STYLE before the page body. Wrap the page in <div class="app">.
 // It also holds the toast and the click handler of the copy buttons
 // (copyLink, codeBlock).
 export const STYLE = `<style>
+  :root{${vars(HUES.light)}}
+  @media (prefers-color-scheme: dark){:root:not([data-theme=light]){${vars(HUES.dark)}}}
+  :root[data-theme=dark]{${vars(HUES.dark)}}
+  :root[data-theme=tokyo]{${vars(HUES.tokyo)}}
+  :root[data-theme=nord]{${vars(HUES.nord)}}
   body{max-width:68rem}
   pre,table{width:auto;min-width:0;max-width:none;left:auto;transform:none}
   .app h1{margin:0;font-size:1.3rem;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
@@ -18,7 +34,7 @@ export const STYLE = `<style>
     margin:0 0 1.5rem;padding-bottom:.6rem;border-bottom:1px solid var(--border)}
   nav.top a{color:var(--muted);text-decoration:none;padding:.25rem .6rem;border-radius:6px}
   nav.top a:hover{color:var(--fg);background:var(--hover)}
-  nav.top a.on{color:var(--fg);background:var(--hover);font-weight:500}
+  nav.top a.on{color:var(--link);font-weight:500;border-radius:6px 6px 0 0;box-shadow:inset 0 -2px 0 var(--link)}
   nav.top .me{margin-left:auto;padding:0 .4rem;overflow-wrap:anywhere}
   nav.top select{font:inherit;font-size:.8rem;background:var(--code-bg);color:var(--fg);
     border:1px solid var(--border);border-radius:6px;padding:.15rem .3rem}
@@ -28,14 +44,14 @@ export const STYLE = `<style>
   .app th{text-align:left;color:var(--muted);font-weight:normal}
   .app td,.app th{border:0;border-bottom:1px solid var(--border);padding:.3em .4em;white-space:nowrap;
     vertical-align:top}
-  .app td.w{width:100%;white-space:normal;overflow-wrap:anywhere}
+  .app td.w{width:100%;min-width:12rem;white-space:normal;overflow-wrap:anywhere}
   .app td.r,.app th.r{text-align:right;font-variant-numeric:tabular-nums}
   .app .hd{display:flex;flex-wrap:wrap;align-items:center;gap:.5rem 1rem;margin:0 0 .75rem}
   .app .scope{display:flex;gap:.25rem;margin-left:auto;font-size:.8rem}
   .app .scope a{text-decoration:none;color:var(--muted);padding:.15rem .55rem;border:1px solid var(--border);border-radius:6px}
   .app .scope a:hover{color:var(--fg)}
   .app .scope a.on{color:var(--fg);background:var(--hover)}
-  .lst thead th{font-size:.75rem;padding:.3em .5em}
+  .lst thead th{font-size:.75rem;padding:.3em .5em;background:color-mix(in srgb,var(--link) 7%,transparent)}
   .lst td{padding:.55rem .5rem;vertical-align:middle;color:var(--muted)}
   .lst tbody tr:hover td{background:var(--hover)}
   .lst td.s{width:100%;min-width:13rem;white-space:normal;color:var(--fg)}
@@ -43,9 +59,15 @@ export const STYLE = `<style>
   .lst .ti{color:var(--fg);font-size:.95rem;font-weight:500;overflow-wrap:break-word}
   .lst .slug{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:.78rem;color:var(--muted);overflow-wrap:break-word}
   .lst .slug:only-child{color:var(--fg);font-size:.85rem}
-  .lst .nm:hover .slug{color:var(--link)}
-  .lst .pub{display:inline-block;font-size:.7rem;color:var(--muted);border:1px solid var(--border);border-radius:5px;
+  .lst .nm:hover .ti,.lst .nm:hover .slug:only-child{color:var(--link)}
+  .lst .pub{display:inline-block;font-size:.7rem;color:var(--link);border:1px solid var(--link);border-radius:5px;
     padding:0 .35em;margin-top:.15rem}
+  .app .rec{color:var(--fg)}
+  .app .old{color:var(--muted)}
+  .app .who{display:inline-flex;align-items:center;gap:.4rem;vertical-align:middle}
+  .app .av{display:inline-flex;align-items:center;justify-content:center;flex:none;width:1.3rem;height:1.3rem;
+    border-radius:50%;background:var(--av);color:var(--bg);font-size:.68rem;font-weight:600;line-height:1}
+${[0, 1, 2, 3, 4, 5, 6].map((i) => `  .app .av.h${i}{--av:var(--h${i})}`).join('\n')}
   .lst td.n,.lst td.v{text-align:right;font-variant-numeric:tabular-nums}
   .lst td.v{cursor:default}
   .lst .acts{opacity:.55;transition:opacity .1s}
@@ -61,7 +83,8 @@ export const STYLE = `<style>
   .app .btn.pri{background:var(--link);border-color:var(--link);color:var(--bg)}
   .sh .slugline{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:.8rem;color:var(--muted);
     margin:.2rem 0 1.25rem;overflow-wrap:anywhere}
-  .sh .slugline a{color:inherit}
+  .sh .slugline a{color:var(--link);text-decoration:none}
+  .sh .slugline a:hover{text-decoration:underline}
   .sh dl.strip{display:flex;flex-wrap:wrap;gap:.4rem 2rem;border:1px solid var(--border);border-radius:8px;
     padding:.6rem 1rem}
   .sh dl.strip dt{font-size:.75rem}
@@ -115,7 +138,9 @@ export const STYLE = `<style>
   .app .d-del{background:rgba(248,81,73,.18)}
   .app .d-gap{color:var(--muted)}
   .app .tag{font-size:.7rem;border:1px solid var(--border);border-radius:5px;padding:0 .35em;color:var(--muted)}
-  .app .tag.live{color:var(--acc2);border-color:var(--acc2)}
+  .app .tag.live,.app .tag.added{color:var(--acc2);border-color:var(--acc2)}
+  .app .tag.pending,.app .tag.changed{color:var(--acc1);border-color:var(--acc1)}
+  .app .tag.removed{color:var(--danger);border-color:var(--danger)}
   .app form{margin:.5rem 0}
   .app button,.app .btn{font:inherit;font-size:.8rem;font-weight:500;line-height:1.5;color:var(--fg);
     background:var(--code-bg);border:1px solid var(--border);border-radius:6px;padding:.3rem .75rem;
@@ -209,7 +234,21 @@ export function nav(email: string, env: Env, current: NavPage) {
 }
 
 // A time as a short relative text, with the ISO time as its title.
+// Times of the last 24 hours show in the text colour, older ones muted.
 export function when(t: number | null | undefined) {
   if (!t) return '—'
-  return `<span title="${new Date(t).toISOString()}">${ago(t)}</span>`
+  return `<span class="${recency(t)}" title="${new Date(t).toISOString()}">${ago(t)}</span>`
+}
+
+export const recency = (t: number, now = Date.now()) => (now - t < 86_400_000 ? 'rec' : 'old')
+
+// A person: a coloured initial and the name (the part before @, or the
+// full email). The hue comes from a hash of the email, so a person has
+// the same colour on every page.
+export function person(email: string, full = false) {
+  const e = email.toLowerCase()
+  let h = 0
+  for (let i = 0; i < e.length; i++) h = (h * 31 + e.charCodeAt(i)) >>> 0
+  const name = full ? email : email.split('@')[0]
+  return `<span class="who"><span class="av h${h % HUES.light.length}" aria-hidden="true">${esc((name[0] || '?').toUpperCase())}</span>${esc(name)}</span>`
 }

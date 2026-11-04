@@ -6,7 +6,7 @@
 
 import type { Env } from '../env'
 import { esc, notFound, page } from '../render/page'
-import { ICON, STYLE, copyLink, iconLink, nav, when } from './shell'
+import { ICON, STYLE, copyLink, iconLink, nav, person, when } from './shell'
 import { contentBase } from '../origins'
 import { isQueryStore, StoreError, type QueryStore, type ShareStore } from '../store'
 import type { Collection, ShareInfo, VersionInfo } from '../api-types'
@@ -47,7 +47,7 @@ export async function sharePage(url: URL, env: Env, store: ShareStore, email: st
   const views = manage ? await store.views(slug) : null
   const collections = manage ? await store.collections() : []
   const viewRows = Object.entries(views ?? {}).sort((a, b) => b[1].last - a[1].last)
-    .map(([e, x]) => `<tr><td class="w">${esc(e)}</td><td class="r">${x.n}</td><td>${when(x.last)}</td></tr>`)
+    .map(([e, x]) => `<tr><td class="w">${person(e, true)}</td><td class="r">${x.n}</td><td>${when(x.last)}</td></tr>`)
 
   const meta = Object.keys(share.meta).length
     ? `<div class="meta"><span>Meta</span><pre>${esc(JSON.stringify(share.meta, null, 2))}</pre></div>` : ''
@@ -57,7 +57,7 @@ export async function sharePage(url: URL, env: Env, store: ShareStore, email: st
 <p class="slugline">${slugLine(slug, share.collection)}</p></div>
 <div class="acts">${copyLink(content)}${iconLink(`${content}_zip`, 'download', 'Download zip')}<a class="btn pri" href="${esc(content)}">Open</a></div></div>
 <dl class="strip">
-<div><dt>Owner</dt><dd>${esc(share.owner)}</dd></div>
+<div><dt>Owner</dt><dd>${person(share.owner, true)}</dd></div>
 <div><dt>Collection</dt><dd>${share.collection ? `<a href="/?c=${encodeURIComponent(share.collection)}">${esc(share.collection)}</a>` : '—'}</dd></div>
 <div><dt>Live version</dt><dd>v${share.version}, ${share.fileCount} file${share.fileCount === 1 ? '' : 's'}, ${bytes(share.totalBytes)}</dd></div>
 <div><dt>Updated</dt><dd>${when(share.updatedAt)}</dd></div>
@@ -89,8 +89,8 @@ function versionTable(versions: VersionInfo[], self: string) {
       ? `<a href="${self}?v=${v.version}">Files</a>${prev ? ` · <a href="${self}?diff=${prev.version}..${v.version}">Diff</a>` : ''}`
       : ''
     return `<tr><td>v${v.version} ${v.live ? '<span class="tag live">live</span>' : ''}${
-      v.state === 'pending' ? '<span class="tag">pending</span>' : ''}</td>
-<td>${esc(v.createdBy)}</td><td>${when(v.createdAt)}</td>
+      v.state === 'pending' ? '<span class="tag pending">pending</span>' : ''}</td>
+<td>${person(v.createdBy, true)}</td><td>${when(v.createdAt)}</td>
 <td class="r">${v.fileCount}</td><td class="r">${bytes(v.totalBytes)}</td>
 <td class="w">${esc(v.message ?? '')}</td><td>${links}</td></tr>`
   })
@@ -161,7 +161,7 @@ ${blocks.join('\n')}${more}`
 }
 
 const fileHead = (p: string, state: string, note?: string) =>
-  `<p class="mono"><b>${esc(p)}</b> <span class="tag">${state}</span>${note ? ` <span class="sub">${note}</span>` : ''}</p>`
+  `<p class="mono"><b>${esc(p)}</b> <span class="tag ${state}">${state}</span>${note ? ` <span class="sub">${note}</span>` : ''}</p>`
 
 // The notice after a move: a toast, or an inline line without JS. The
 // script also takes ?moved off the address.
@@ -320,7 +320,7 @@ export async function collectionsPage(env: Env, store: ShareStore, email: string
   if (!isQueryStore(store)) return notFound()
   const rows = (await store.collections()).map((c) => `<tr><td class="s"><a class="nm" href="/?c=${encodeURIComponent(c.slug)}">${
     c.title ? `<span class="ti">${esc(c.title)}</span>` : ''}<span class="slug">${esc(c.slug)}</span></a></td>
-<td class="o">${esc(c.owner.split('@')[0])}</td><td class="n">${c.shares}</td><td class="t">${when(c.updatedAt)}</td></tr>`)
+<td class="o">${person(c.owner)}</td><td class="n">${c.shares}</td><td class="t">${when(c.updatedAt)}</td></tr>`)
   return page('Collections', `${STYLE}<div class="app">${nav(email, env, 'collections')}<div class="hd"><h1>Collections</h1></div>
 <p class="sub">Every collection. Anyone at Metabase can see the shares in a collection.</p>
 ${rows.length ? `<div class="scroll"><table class="lst"><thead><tr><th>Collection</th><th>Owner</th><th class="r">Shares</th><th>Updated</th></tr></thead><tbody>${rows.join('')}</tbody></table></div>`
