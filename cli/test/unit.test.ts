@@ -1,6 +1,6 @@
 import { mkdirSync, mkdtempSync, readFileSync, statSync, symlinkSync, writeFileSync } from 'node:fs'
 import { homedir, tmpdir } from 'node:os'
-import { join } from 'node:path'
+import { dirname, join } from 'node:path'
 import { describe, expect, it } from 'vitest'
 import { loadConfig, loginConfigPath, parseConfig, updateConfig } from '../config'
 import { collect, defaultName, deslug, localCopy, mirror } from '../files'
@@ -148,6 +148,12 @@ describe('config', () => {
     updateConfig(p, { UPLOAD_TOKEN: undefined })
     expect(readFileSync(p, 'utf8')).toBe('BASE_URL=https://a\nMIRROR_DIR=/m\n')
     expect(statSync(p).mode & 0o777).toBe(0o600)
+  })
+
+  it('makes a new config directory open to its owner only', () => {
+    const p = join(tmp(), 'sub/config')
+    updateConfig(p, { UPLOAD_TOKEN: 't' })
+    expect(statSync(dirname(p)).mode & 0o777).toBe(0o700)
   })
 })
 

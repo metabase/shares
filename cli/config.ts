@@ -70,7 +70,7 @@ export function updateConfig(path: string, values: Partial<Record<(typeof CONFIG
     ? readFileSync(path, 'utf8').split('\n').filter((l) => l && !keys.some((k) => new RegExp(`^\\s*(export\\s+)?${k}=`).test(l)))
     : []
   for (const [k, v] of Object.entries(values)) if (v !== undefined) kept.push(`${k}=${v}`)
-  mkdirSync(dirname(path), { recursive: true })
+  mkdirSync(dirname(path), { recursive: true, mode: 0o700 })
   const tmp = `${path}.tmp`
   writeFileSync(tmp, kept.length ? kept.join('\n') + '\n' : '', { mode: 0o600 })
   chmodSync(tmp, 0o600)
