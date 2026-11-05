@@ -133,7 +133,7 @@ ${codeBlock(created.token)}
     : created
     ? `<div class="box new"><h2>New token <code>${esc(created.name)}</code></h2>
 <p>Shown once. This line saves it as the <code>share</code> config:</p>
-${codeBlock(`mkdir -p ~/.config/shares && (umask 077; printf 'BASE_URL=%s\\nCONTENT_URL=%s\\nUPLOAD_TOKEN=%s\\n' '${app}' '${content}' '${created.token}' > ~/.config/shares/config)`)}
+${codeBlock(`(umask 077; mkdir -p ~/.config/shares && rm -f ~/.config/shares/config && printf 'BASE_URL=%s\\nCONTENT_URL=%s\\nUPLOAD_TOKEN=%s\\n' '${app}' '${content}' '${created.token}' > ~/.config/shares/config)`)}
 </div>`
     : ''
   return page('Install', `${STYLE}

@@ -7,7 +7,7 @@
 
 import { spawn, spawnSync, type ChildProcess } from 'node:child_process'
 import { createHmac } from 'node:crypto'
-import { mkdirSync, mkdtempSync, readFileSync, realpathSync, writeFileSync } from 'node:fs'
+import { chmodSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, statSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
@@ -188,6 +188,29 @@ describe('share CLI against wrangler dev', () => {
     expect(ls.map((x: { id: string }) => x.id)).toContain(t.id)
     await share(['token', 'revoke', t.id, '--service'], { env: admin })
     expect((await share(['whoami'], { env: bot })).code).toBe(1)
+  })
+
+  it('saves a private config with the line that the token page shows', async () => {
+    const page = await fetch(`${LOCAL}/_token`, {
+      method: 'POST',
+      headers: { cookie: session(USER), origin: LOCAL, 'content-type': 'application/x-www-form-urlencoded' },
+      body: new URLSearchParams({ action: 'create', name: 'by hand' }),
+    })
+    const line = /<pre><code>([^<]*UPLOAD_TOKEN[^<]*)<\/code><\/pre>/.exec(await page.text())![1]
+      .replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&quot;/g, '"').replace(/&amp;/g, '&')
+    const fresh = join(dir, 'page-fresh')
+    const old = join(dir, 'page-old')
+    mkdirSync(fresh)
+    mkdirSync(join(old, '.config/shares'), { recursive: true })
+    writeFileSync(join(old, '.config/shares/config'), 'UPLOAD_TOKEN=old\n')
+    chmodSync(join(old, '.config/shares/config'), 0o644)
+
+    for (const home of [fresh, old]) {
+      expect(spawnSync('sh', ['-c', line], { env: { PATH: process.env.PATH, HOME: home } }).status).toBe(0)
+      expect(statSync(join(home, '.config/shares/config')).mode & 0o777).toBe(0o600)
+      expect(JSON.parse((await share(['whoami', '--json'], { env: { HOME: home } })).stdout)).toMatchObject({ email: USER })
+    }
+    expect(statSync(join(fresh, '.config/shares')).mode & 0o777).toBe(0o700)
   })
 
   it('logs out: the token is revoked and removed from the config', async () => {
