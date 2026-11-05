@@ -43,8 +43,9 @@ export async function signEmail(env: Env, email: string, ttl: number, tag = '') 
 }
 
 export async function verifyEmail(env: Env, value: string, tag = ''): Promise<string | null> {
-  const [emailB64, exp, sig] = value.split('.')
-  if (!emailB64 || !exp || !sig) return null
+  const parts = value.split('.')
+  const [emailB64, exp, sig] = parts
+  if (parts.length !== 3 || !emailB64 || !/^\d+$/.test(exp) || !sig) return null
   if (Number(exp) < Date.now() / 1000) return null
   if (sig !== await hmac(env, `${tag}${emailB64}.${exp}`)) return null
   try { return unb64(emailB64) } catch { return null }
