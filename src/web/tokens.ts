@@ -26,11 +26,11 @@ const origins = (url: URL, env: Env) => ({
 export async function deviceApi(req: Request, url: URL, env: Env): Promise<Response | null> {
   if (req.method !== 'POST' || (url.pathname !== '/_device/code' && url.pathname !== '/_device/token')) return null
   if (env.PUBLIC || !env.DB) return new Response('not found\n', { status: 404 })
-  let body: { name?: unknown; device_code?: unknown }
+  let body: { name?: unknown; device_code?: unknown } | null
   try { body = await req.json() } catch { return new Response('bad json\n', { status: 400 }) }
 
   if (url.pathname === '/_device/code') {
-    const { deviceCode, userCode } = await startDevice(env, typeof body.name === 'string' ? body.name : '')
+    const { deviceCode, userCode } = await startDevice(env, typeof body?.name === 'string' ? body.name : '')
     const { app, content } = origins(url, env)
     const verify = `${app}${approvePath(url, env)}`
     return Response.json({
@@ -45,7 +45,7 @@ export async function deviceApi(req: Request, url: URL, env: Env): Promise<Respo
     } satisfies DeviceStartResponse)
   }
 
-  if (typeof body.device_code !== 'string') return new Response('device_code missing\n', { status: 400 })
+  if (typeof body?.device_code !== 'string') return new Response('device_code missing\n', { status: 400 })
   const r = await pollDevice(env, body.device_code)
   return Response.json(r satisfies DeviceTokenResponse, { status: 'error' in r ? 400 : 200 })
 }

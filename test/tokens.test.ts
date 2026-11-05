@@ -216,6 +216,13 @@ describe('share login device flow', () => {
     expect((await poll(d)).status).toBe(200)
   })
 
+  it('answers a JSON null body like an empty object', async () => {
+    expect((await json('/_device/code', null)).status).toBe(200)
+    const r = await json('/_device/token', null)
+    expect(r.status).toBe(400)
+    expect(await r.text()).toBe('device_code missing\n')
+  })
+
   it('runs on the combined host with the approve page at /_device', async () => {
     const d = await startLogin('dev box', ORIGIN)
     expect(d.verification_uri).toBe(`${ORIGIN}/_device`)
