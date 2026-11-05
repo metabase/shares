@@ -30,7 +30,8 @@ export function configPath(env: Env = process.env): string {
   return !existsSync(path) && existsSync(old) ? old : path
 }
 
-// Where `share login` saves the token: SHARE_CONF, else ~/.config/shares/config even when only the old mb-shares file exists.
+// Where `share login` saves the token: SHARE_CONF, else ~/.config/shares/config,
+// even when only the old mb-shares file exists.
 export function loginConfigPath(env: Env = process.env): string {
   return env.SHARE_CONF || join(env.HOME || homedir(), '.config/shares/config')
 }
@@ -59,7 +60,8 @@ export function loadConfig(env: Env = process.env): Config {
   const baseUrl = trim(env.SHARES_URL || file.BASE_URL || env.BASE_URL)
   const fileUrl = trim(file.BASE_URL)
   // The file's token belongs to the server in the file's BASE_URL.
-  // When SHARES_URL names another server, the token is withheld and savedTokenUrl holds the file's BASE_URL.
+  // When SHARES_URL names another server,
+  // the token is withheld and savedTokenUrl holds the file's BASE_URL.
   const withheld = !env.SHARES_TOKEN && !!file.UPLOAD_TOKEN && !!fileUrl && !!baseUrl && originOf(fileUrl) !== originOf(baseUrl)
   return {
     path,

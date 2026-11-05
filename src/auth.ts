@@ -24,7 +24,8 @@ export async function hmac(env: Env, data: string) {
 async function hmacMatches(env: Env, data: string, sig: string) {
   let bytes: Uint8Array
   try { bytes = Uint8Array.from(unb64(sig), (c) => c.charCodeAt(0)) } catch { return false }
-  // atob ignores the spare bits of the last character, so several spellings decode to the same bytes.
+  // atob ignores the spare bits of the last character,
+  // so several spellings decode to the same bytes.
   if (bytes.length !== 32 || b64url(bytes) !== sig) return false
   return crypto.subtle.verify('HMAC', await hmacKey(env, 'verify'), bytes, new TextEncoder().encode(data))
 }
