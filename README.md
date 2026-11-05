@@ -4,6 +4,9 @@ Private file sharing for Metabase. `share <path>` publishes files and prints a l
 @metabase.com Google accounts can open. Agents publish runs into collections with metadata and
 read them back as JSON.
 
+Without the CLI: on the app's share list, Upload (or drop files or a folder on the page) makes a
+new share; on a share page, Upload version replaces its files with a new version.
+
 - Share links: `https://shares.metabase.fyi/<slug>/` (content host: user files only)
 - App: `https://app.shares.metabase.fyi` (API, login, tokens, share list, search)
 

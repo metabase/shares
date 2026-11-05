@@ -165,7 +165,7 @@ const UP_STYLE = `<style>
   .updlg .uperr{margin:0;font-size:.85rem;color:var(--danger);border:1px solid color-mix(in srgb,var(--danger) 45%,transparent);
     border-radius:8px;padding:.5rem .7rem;overflow-wrap:anywhere}
   .updlg .upbtns{display:flex;justify-content:flex-end;gap:.5rem}
-  .updlg button:disabled{opacity:.55;cursor:default}
+  .updlg button:disabled,.updlg input:disabled{opacity:.55;cursor:default}
   @media (prefers-reduced-motion:reduce){.updlg .upl .bar i{transition:none}}
 </style>`
 
@@ -218,7 +218,13 @@ const UP_SCRIPT = `
     e.preventDefault(); depth = 0; drop.hidden = true
     if (busy || dlg.open) return
     var entries = Array.from(e.dataTransfer.items).map(function (i) { return i.webkitGetAsEntry && i.webkitGetAsEntry() }).filter(Boolean)
-    if (!entries.length) return
+    // no entry API (or synthetic items): plain files at the top level
+    if (!entries.length) {
+      var fs = Array.from(e.dataTransfer.files).filter(function (f) { return !skip(f.name) })
+      if (!fs.length) return
+      return open(fs.length === 1 ? [{ file: fs[0], path: single(fs[0]) }]
+        : fs.map(function (f) { return { file: f, path: f.name } }), slugOf(fs[0].name, true))
+    }
     Promise.all(entries.map(function (en) { return walk(en, en.isDirectory && entries.length > 1 ? en.name + '/' : '') }))
       .then(function (lists) {
         var out = [].concat.apply([], lists)
@@ -257,6 +263,7 @@ const UP_SCRIPT = `
       list.appendChild(li); x.li = li
     })
     err.hidden = true; go.disabled = false; cancel.disabled = false; go.textContent = 'Upload'
+    lock(false)
     if (form.slug) { form.slug.value = slugOf(slug, false) + '-' + suffix(); form.title.value = '' }
     if (form.message) form.message.value = ''
     var big = items.filter(function (x) { return x.file.size > L.fileBytes })
@@ -271,8 +278,10 @@ const UP_SCRIPT = `
   function fail(msg, toast) {
     if (toast) return appToast(msg, 2500)
     err.textContent = msg; err.hidden = false; busy = false
+    lock(false)
     go.disabled = !!blocked; cancel.disabled = false; go.textContent = blocked ? 'Upload' : 'Retry'
   }
+  function lock(on) { form.querySelectorAll('input').forEach(function (i) { i.disabled = on }) }
   function state(x, s, cls, pct) {
     x.li.querySelector('.s').textContent = s
     x.li.className = cls || ''
@@ -309,6 +318,7 @@ const UP_SCRIPT = `
 
   async function run(slug) {
     busy = true; go.disabled = true; cancel.disabled = true; err.hidden = true; go.textContent = 'Uploading'
+    lock(true)
     for (var i = 0; i < items.length; i++) {
       var x = items[i]
       if (!x.sha) { state(x, 'hashing', '', 0); x.sha = hex(await crypto.subtle.digest('SHA-256', await x.file.arrayBuffer())) }
