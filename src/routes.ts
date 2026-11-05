@@ -12,6 +12,7 @@ import INSTALL_SH from '../cli/install.sh'
 import { approvePath, deviceApi, formPost } from './web/tokens'
 import { serve } from './web/serve'
 import { managePost } from './web/manage'
+import { isUpload, upload } from './web/upload'
 import { notFound } from './render/page'
 import { baseSlug, storeFor, type ShareStore } from './store'
 import { appBase, contentBase } from './origins'
@@ -120,6 +121,7 @@ export async function handle(req: Request, env: Env, ctx: ExecutionContext): Pro
   const pub = await open(req, url, env)
   if (pub) return pub
   if (isFormPost(req, url, env)) return lockDown(await form(req, url, env, await sessionEmail(req, env)))
+  if (isUpload(req, url, env)) return lockDown(await upload(req, url, env, store, await sessionEmail(req, env)))
   if (isApi(req, url)) return api(req, url, env, store)
 
   if (url.pathname === '/auth/callback' && !env.PUBLIC) return handleCallback(url, env)
@@ -211,6 +213,7 @@ async function appRoutes(req: Request, env: Env): Promise<Response> {
   if (pub) return pub
   if (url.pathname === '/install.sh' && req.method === 'GET' && !env.PUBLIC) return installScript(url, env)
   if (isFormPost(req, url, env)) return form(req, url, env, await sessionEmail(req, env, COOKIE.app))
+  if (isUpload(req, url, env)) return upload(req, url, env, store, await sessionEmail(req, env, COOKIE.app))
   if (isApi(req, url)) return api(req, url, env, store)
 
   if (url.pathname === '/auth/callback' && !env.PUBLIC) return handleCallback(url, env, COOKIE.app)
