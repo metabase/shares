@@ -91,11 +91,25 @@ export function setCookie(name: string, value: string, maxAge: number) {
   return `${name}=${value}; Path=/; HttpOnly; Secure; SameSite=Lax; Max-Age=${maxAge}`
 }
 
-// Login ticket: the app host signs the viewer's email and the target URL on
-// the content host, valid TICKET_SECONDS. The content host accepts it only
-// for that exact target, then sets its own cookie.
+// Login ticket: the app host signs the viewer's email, a random nonce and the content host target URL.
+// The content host accepts it once, for that exact target, within TICKET_SECONDS.
 export const TICKET_SECONDS = 60
-export const ticketTag = (target: string) => `tkt.${target}.`
+export const ticketTag = (target: string, nonce: string) => `tkt.${nonce}.${target}.`
+export const newTicketNonce = () => b64url(crypto.getRandomValues(new Uint8Array(16)))
+// A nonce has no dot, so it cannot move where the target starts in ticketTag.
+export const isTicketNonce = (nonce: string) => /^[\w-]{22}$/.test(nonce)
+
+// true the first time a ticket's nonce is redeemed.
+// The row expires TICKET_SECONDS after the redeem, which is after the ticket itself expires.
+export async function redeemTicket(env: Env, nonce: string) {
+  const now = Date.now()
+  const [, insert] = await env.DB.batch([
+    env.DB.prepare('DELETE FROM used_tickets WHERE expires_at < ?').bind(now),
+    env.DB.prepare('INSERT OR IGNORE INTO used_tickets (nonce, expires_at) VALUES (?, ?)')
+      .bind(nonce, now + TICKET_SECONDS * 1000),
+  ])
+  return insert.meta.changes > 0
+}
 
 export function redirectToGoogle(url: URL, env: Env) {
   const auth = new URL('https://accounts.google.com/o/oauth2/v2/auth')
