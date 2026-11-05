@@ -141,6 +141,18 @@ describe('config', () => {
       .toMatchObject({ baseUrl: 'https://env', token: 'env' })
   })
 
+  it('withholds the saved token from another server that SHARES_URL names', () => {
+    const home = tmp()
+    const conf = join(home, 'c')
+    writeFileSync(conf, 'BASE_URL=https://app.shares.test\nUPLOAD_TOKEN=file\n')
+    const env = { HOME: home, SHARE_CONF: conf }
+    for (const url of ['http://localhost:8787', 'http://app.shares.test', 'https://app.shares.test:8443']) {
+      expect(loadConfig({ ...env, SHARES_URL: url }))
+        .toMatchObject({ baseUrl: url, token: undefined, savedTokenUrl: 'https://app.shares.test' })
+    }
+    expect(loadConfig({ ...env, SHARES_URL: 'https://app.shares.test/' })).toMatchObject({ token: 'file', savedTokenUrl: undefined })
+  })
+
   it('updates keys in place, keeps other lines and writes mode 0600', () => {
     const p = join(tmp(), 'sub/config')
     updateConfig(p, { BASE_URL: 'https://a', UPLOAD_TOKEN: 't' })
@@ -197,6 +209,17 @@ describe('a token the server refuses', () => {
   it('reports a 401 to login itself as the server sent it', async () => {
     const r = await refusedRun(['login', 'https://old.test'], { SHARE_NO_BROWSER: '1' })
     expect(r.stderr).toBe('share: 401 unauthorized (POST /_device/code)\n')
+  })
+})
+
+describe('the saved token and SHARES_URL', () => {
+  afterEach(() => { vi.restoreAllMocks() })
+
+  it('sends no request to another server and says how to give it a token', async () => {
+    const r = await refusedRun(['whoami'], { SHARES_URL: 'http://localhost:8787' })
+    expect(globalThis.fetch).not.toHaveBeenCalled()
+    expect(r.stderr).toMatch(/^share: the token in \S+ is for https:\/\/app\.shares\.test: set SHARES_TOKEN to a token for http:\/\/localhost:8787\n$/)
+    expect(r.code).toBe(2)
   })
 })
 

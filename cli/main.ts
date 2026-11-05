@@ -163,6 +163,9 @@ class Ctx {
   emit(v: unknown) { if (this.opts.json) this.io.stdout(JSON.stringify(v) + '\n') }
 
   get api(): Client {
+    if (this.cfg.savedTokenUrl) {
+      throw new UsageError(`the token in ${this.cfg.path} is for ${this.cfg.savedTokenUrl}: set SHARES_TOKEN to a token for ${this.cfg.baseUrl}`)
+    }
     if (!this.cfg.baseUrl || !this.cfg.token) {
       throw new UsageError(`not logged in: run \`share login\` (config ${this.cfg.path})`)
     }

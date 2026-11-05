@@ -16,6 +16,7 @@ export interface Config {
   baseUrl?: string
   contentUrl?: string
   token?: string
+  savedTokenUrl?: string
   mirrorDir: string
 }
 
@@ -46,6 +47,8 @@ export function parseConfig(text: string): Record<string, string> {
   return out
 }
 
+const originOf = (u: string) => { try { return new URL(u).origin } catch { return u } }
+
 // The file wins over the environment, as when bash sources it. SHARES_URL,
 // SHARES_CONTENT_URL and SHARES_TOKEN win over the file (CI, agents).
 export function loadConfig(env: Env = process.env): Config {
@@ -53,12 +56,18 @@ export function loadConfig(env: Env = process.env): Config {
   const file = existsSync(path) ? parseConfig(readFileSync(path, 'utf8')) : {}
   const home = env.HOME || homedir()
   const trim = (u?: string) => u?.replace(/\/+$/, '') || undefined
+  const baseUrl = trim(env.SHARES_URL || file.BASE_URL || env.BASE_URL)
+  const fileUrl = trim(file.BASE_URL)
+  // The file's token belongs to the server in the file's BASE_URL.
+  // When SHARES_URL names another server, the token is withheld and savedTokenUrl holds the file's BASE_URL.
+  const withheld = !env.SHARES_TOKEN && !!file.UPLOAD_TOKEN && !!fileUrl && !!baseUrl && originOf(fileUrl) !== originOf(baseUrl)
   return {
     path,
     legacy: path === join(home, '.config/mb-shares/env'),
-    baseUrl: trim(env.SHARES_URL || file.BASE_URL || env.BASE_URL),
+    baseUrl,
     contentUrl: trim(env.SHARES_CONTENT_URL || file.CONTENT_URL || env.CONTENT_URL),
-    token: env.SHARES_TOKEN || file.UPLOAD_TOKEN || env.UPLOAD_TOKEN || undefined,
+    token: withheld ? undefined : env.SHARES_TOKEN || file.UPLOAD_TOKEN || env.UPLOAD_TOKEN || undefined,
+    savedTokenUrl: withheld ? fileUrl : undefined,
     mirrorDir: file.MIRROR_DIR || env.MIRROR_DIR || join(home, '.local/share/mb-shares'),
   }
 }
