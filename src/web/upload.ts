@@ -110,8 +110,11 @@ export function uploadUi(o: UploadOpts) {
 <p class="hint">The files replace the live version. The old version stays in the history.</p>
 <label>Message <span class="opt">optional</span><input name="message" autocomplete="off"></label>`
   return `${UP_STYLE}<span class="up" ${data}>
-<button type="button" class="${o.mode === 'new' ? 'pri' : ''}" data-up-pick="f">${o.mode === 'new' ? 'Upload' : 'Upload version'}</button>
-<button type="button" data-up-pick="d" title="Upload a folder">Folder</button>
+<button type="button" class="upbtn${o.mode === 'new' ? ' pri' : ''}" id="upbtn" aria-haspopup="menu" aria-expanded="false" aria-controls="upmenu">${o.mode === 'new' ? 'Upload' : 'Upload version'}${CHEVRON}</button>
+<div class="upmenu" id="upmenu" role="menu" aria-labelledby="upbtn" hidden>
+<button type="button" role="menuitem" tabindex="-1" data-up-pick="f">Files…</button>
+<button type="button" role="menuitem" tabindex="-1" data-up-pick="d">Folder…</button>
+</div>
 <input type="file" multiple hidden data-up-in="f"><input type="file" webkitdirectory hidden data-up-in="d">
 </span>
 <div class="updrop" hidden><div><strong>Drop to upload</strong><span>${o.mode === 'new' ? 'Files or a folder become a new share' : `Files or a folder become a new version of ${esc(o.slug ?? '')}`}</span></div></div>
@@ -125,11 +128,26 @@ ${head}
 <script>${UP_SCRIPT.replace('__LIMITS__', JSON.stringify(LIMITS))}</script>`
 }
 
+const CHEVRON = '<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><polyline points="6 9 12 15 18 9"/></svg>'
+
 const esc = (s: string) => s.replace(/[&<>"']/g, (c) => `&#${c.charCodeAt(0)};`)
 const attr = esc
 
 const UP_STYLE = `<style>
-  .up{display:inline-flex;gap:.4rem;align-items:center}
+  .up{position:relative;display:inline-flex;align-items:center}
+  .app .upbtn{gap:.35rem}
+  .app .upbtn svg{display:block;transition:transform .1s}
+  .app .upbtn[aria-expanded=true] svg{transform:rotate(180deg)}
+  .upmenu{position:absolute;right:0;top:calc(100% + .3rem);z-index:25;min-width:9.5rem;padding:.25rem;
+    display:flex;flex-direction:column;background:var(--bg);border:1px solid var(--border);border-radius:8px;
+    box-shadow:0 8px 24px rgba(0,0,0,.25)}
+  .upmenu[hidden]{display:none}
+  .app .upmenu [role=menuitem]{display:flex;width:100%;justify-content:flex-start;background:none;border:0;
+    border-radius:6px;padding:.4rem .6rem;font-weight:400;font-size:.85rem;color:var(--fg);white-space:nowrap}
+  .app .upmenu [role=menuitem]:hover,.app .upmenu [role=menuitem]:focus-visible{background:var(--hover)}
+  .app .upmenu [role=menuitem]:focus{outline:none}
+  .app .upmenu [role=menuitem]:focus-visible{outline:2px solid var(--link);outline-offset:-2px}
+  @media (prefers-reduced-motion:reduce){.app .upbtn svg{transition:none}}
   .updrop{position:fixed;inset:0;z-index:30;display:flex;align-items:center;justify-content:center;padding:1rem;
     background:color-mix(in srgb,var(--bg) 70%,transparent);pointer-events:none}
   .updrop[hidden]{display:none}
@@ -190,8 +208,28 @@ const UP_SCRIPT = `
   }
   var single = function (f) { return /\\.md$/.test(f.name) ? 'index.md' : /\\.html$/.test(f.name) ? 'index.html' : f.name }
 
-  root.querySelectorAll('[data-up-pick]').forEach(function (b) {
-    b.addEventListener('click', function () { var i = root.querySelector('[data-up-in="' + b.dataset.upPick + '"]'); i.value = ''; i.click() })
+  // the Upload menu: Files... and Folder... (menu button pattern)
+  var btn = root.querySelector('.upbtn'), menu = root.querySelector('.upmenu')
+  var mitems = Array.from(menu.querySelectorAll('[role=menuitem]'))
+  function openMenu(at) { menu.hidden = false; btn.setAttribute('aria-expanded', 'true'); mitems[(at + mitems.length) % mitems.length].focus() }
+  function closeMenu(refocus) { if (menu.hidden) return; menu.hidden = true; btn.setAttribute('aria-expanded', 'false'); if (refocus) btn.focus() }
+  btn.addEventListener('click', function () { if (menu.hidden) openMenu(0); else closeMenu(true) })
+  btn.addEventListener('keydown', function (e) {
+    if (e.key === 'ArrowDown' || e.key === 'ArrowUp') { e.preventDefault(); openMenu(e.key === 'ArrowDown' ? 0 : -1) }
+  })
+  menu.addEventListener('keydown', function (e) {
+    var i = mitems.indexOf(document.activeElement)
+    if (e.key === 'ArrowDown' || e.key === 'ArrowUp') { e.preventDefault(); mitems[(i + (e.key === 'ArrowDown' ? 1 : -1) + mitems.length) % mitems.length].focus() }
+    else if (e.key === 'Home' || e.key === 'End') { e.preventDefault(); mitems[e.key === 'Home' ? 0 : mitems.length - 1].focus() }
+    else if (e.key === 'Escape') { e.preventDefault(); closeMenu(true) }
+    else if (e.key === 'Tab') closeMenu(false)
+  })
+  document.addEventListener('click', function (e) { if (!root.contains(e.target)) closeMenu(false) })
+  mitems.forEach(function (b) {
+    b.addEventListener('click', function () {
+      closeMenu(true)
+      var i = root.querySelector('[data-up-in="' + b.dataset.upPick + '"]'); i.value = ''; i.click()
+    })
   })
   root.querySelector('[data-up-in="f"]').addEventListener('change', function () {
     var fs = Array.from(this.files)
