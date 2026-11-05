@@ -34,9 +34,15 @@ async function hmacMatches(env: Env, data: string, sig: string) {
 // ADMIN_EMAIL and cannot be revoked.
 export type Caller = TokenCaller | { kind: 'user'; email: string; id: null }
 
+// timingSafeEqual needs two inputs of one length, so it compares the SHA-256 of each.
+async function sameSecret(a: string, b: string) {
+  const digest = (s: string) => crypto.subtle.digest('SHA-256', new TextEncoder().encode(s))
+  return crypto.subtle.timingSafeEqual(await digest(a), await digest(b))
+}
+
 export async function authenticate(env: Env, bearer: string): Promise<Caller | null> {
   if (!bearer) return null
-  if (env.UPLOAD_TOKEN && bearer === env.UPLOAD_TOKEN) return { kind: 'user', email: env.ADMIN_EMAIL, id: null }
+  if (env.UPLOAD_TOKEN && await sameSecret(bearer, env.UPLOAD_TOKEN)) return { kind: 'user', email: env.ADMIN_EMAIL, id: null }
   // PUBLIC has no login, so no personal tokens: UPLOAD_TOKEN is the only writer
   if (env.PUBLIC) return null
   return verifyToken(env, bearer)

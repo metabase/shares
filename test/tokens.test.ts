@@ -78,6 +78,14 @@ describe('CLI tokens', () => {
     expect(row!.revoked_at).toBeNull()
   })
 
+  it('accepts the shared UPLOAD_TOKEN only when it matches exactly', async () => {
+    const up = env.UPLOAD_TOKEN!
+    expect((await list(up)).status).toBe(200)
+    for (const t of [up.slice(0, -1), `${up}x`, `${up.slice(0, -1)}X`]) {
+      expect((await list(t)).status).toBe(401)
+    }
+  })
+
   it('refuses to revoke the shared UPLOAD_TOKEN', async () => {
     const r = await onApp('/_api/tokens/current', { method: 'DELETE', headers: bearer(env.UPLOAD_TOKEN!) })
     expect(r.status).toBe(400)
