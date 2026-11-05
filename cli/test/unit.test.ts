@@ -1,10 +1,10 @@
 import { mkdirSync, mkdtempSync, readFileSync, statSync, symlinkSync, writeFileSync } from 'node:fs'
 import { homedir, tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
-import { describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 import { loadConfig, loginConfigPath, parseConfig, updateConfig } from '../config'
 import { collect, defaultName, deslug, localCopy, mirror } from '../files'
-import { loginBase, parseArgs } from '../main'
+import { loginBase, main, parseArgs } from '../main'
 
 const tmp = () => mkdtempSync(join(tmpdir(), 'share-unit-'))
 
@@ -154,6 +154,49 @@ describe('config', () => {
     const p = join(tmp(), 'sub/config')
     updateConfig(p, { UPLOAD_TOKEN: 't' })
     expect(statSync(dirname(p)).mode & 0o777).toBe(0o700)
+  })
+})
+
+// `share <argv>` with a saved login, against a server that answers every request with 401
+async function refusedRun(argv: string[], env: Record<string, string> = {}) {
+  const home = tmp()
+  mkdirSync(join(home, '.config/shares'), { recursive: true })
+  writeFileSync(join(home, '.config/shares/config'), 'BASE_URL=https://app.shares.test\nUPLOAD_TOKEN=shr_revoked\n')
+  vi.spyOn(globalThis, 'fetch').mockImplementation(async () => new Response('unauthorized\n', { status: 401 }))
+  let stdout = ''
+  let stderr = ''
+  const code = await main(argv, {
+    stdout: (s) => { stdout += String(s) },
+    stderr: (s) => { stderr += s },
+    stdin: async () => new Uint8Array(),
+    env: { HOME: home, ...env },
+    cwd: home,
+  })
+  return { code, stdout, stderr }
+}
+
+describe('a token the server refuses', () => {
+  afterEach(() => { vi.restoreAllMocks() })
+
+  it.each([['whoami'], ['cat', 'x-a3f2b/a.md']])('tells the user to log in again on %s', async (...argv) => {
+    const r = await refusedRun(argv)
+    expect(r.stderr).toBe('share: the server refused the saved token: run `share login` again\n')
+    expect(r.code).toBe(1)
+  })
+
+  it('keeps the 401 status in --json', async () => {
+    const r = await refusedRun(['--json'])
+    expect(JSON.parse(r.stdout)).toMatchObject({ status: 401, error: expect.stringContaining('share login') })
+  })
+
+  it('names SHARES_TOKEN when the token came from it', async () => {
+    const r = await refusedRun(['whoami'], { SHARES_TOKEN: 'shr_env' })
+    expect(r.stderr).toBe('share: the server refused the token in SHARES_TOKEN\n')
+  })
+
+  it('reports a 401 to login itself as the server sent it', async () => {
+    const r = await refusedRun(['login', 'https://old.test'], { SHARE_NO_BROWSER: '1' })
+    expect(r.stderr).toBe('share: 401 unauthorized (POST /_device/code)\n')
   })
 })
 

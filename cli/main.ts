@@ -191,7 +191,7 @@ class Ctx {
   // raw bytes of one share file; path = "<slug>/<file>"
   async bytes(path: string) {
     const res = await this.api.request('GET', filePathUrl('', path))
-    if (!res.ok) throw new HttpError(res.status, await res.text(), `GET /${path}`)
+    if (!res.ok) throw new HttpError(res.status, await res.text(), `GET /${path}`, true)
     return new Uint8Array(await res.arrayBuffer())
   }
 }
@@ -213,7 +213,10 @@ export async function main(argv: string[], io: Io): Promise<number> {
     else await publish(ctx, args)
     return 0
   } catch (e) {
-    const msg = (e as Error).message
+    const refused = e instanceof HttpError && e.status === 401 && e.sentToken
+    const msg = !refused ? (e as Error).message
+      : io.env.SHARES_TOKEN ? 'the server refused the token in SHARES_TOKEN'
+      : 'the server refused the saved token: run `share login` again'
     if (json) io.stdout(JSON.stringify({ error: msg, ...(e instanceof HttpError ? { status: e.status } : {}) }) + '\n')
     io.stderr(`share: ${msg}\n`)
     return e instanceof UsageError ? 2 : 1
