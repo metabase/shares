@@ -1,8 +1,8 @@
 import { mkdirSync, mkdtempSync, readFileSync, statSync, symlinkSync, writeFileSync } from 'node:fs'
-import { tmpdir } from 'node:os'
+import { homedir, tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { describe, expect, it } from 'vitest'
-import { loadConfig, parseConfig, updateConfig } from '../config'
+import { loadConfig, loginConfigPath, parseConfig, updateConfig } from '../config'
 import { collect, defaultName, deslug, localCopy, mirror } from '../files'
 import { loginBase, parseArgs } from '../main'
 
@@ -120,6 +120,17 @@ describe('config', () => {
     const env = { HOME: home }
     expect(loadConfig(env).legacy).toBe(false)
     expect(loginBase(undefined, env, loadConfig(env))).toBe('https://mine')
+  })
+
+  it('saves the login under the home directory when HOME is unset', () => {
+    expect(loginConfigPath({})).toBe(join(homedir(), '.config/shares/config'))
+  })
+
+  it('saves the login to the new config while the old mb-shares env file is read', () => {
+    const home = tmp()
+    mkdirSync(join(home, '.config/mb-shares'), { recursive: true })
+    writeFileSync(join(home, '.config/mb-shares/env'), 'BASE_URL=https://old/\nUPLOAD_TOKEN=t\n')
+    expect(loginConfigPath({ HOME: home })).toBe(join(home, '.config/shares/config'))
   })
 
   it('lets SHARES_TOKEN and SHARES_URL win over the file', () => {

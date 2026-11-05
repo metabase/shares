@@ -10,7 +10,7 @@ import type {
   ServiceTokenInfo, TokenInfo, VersionInfo, WhoAmI,
 } from '../src/api-types'
 import { filePathUrl, parseLines, parseViews } from '../src/api-types'
-import { DEFAULT_APP, loadConfig, updateConfig, type Config } from './config'
+import { DEFAULT_APP, loadConfig, loginConfigPath, updateConfig, type Config } from './config'
 import { collect, defaultName, deslug, localCopy, localPath, mirror, randomSuffix, readBytes, sha256, type LocalFile } from './files'
 import { client, HttpError, pool, sleep, UsageError, type Client } from './http'
 
@@ -502,7 +502,7 @@ async function login(ctx: Ctx, arg?: string) {
       if (r.error === 'expired_token') break
       throw new Error(`login failed: ${r.error}`)
     }
-    const path = ctx.io.env.SHARE_CONF || join(ctx.io.env.HOME || '', '.config/shares/config')
+    const path = loginConfigPath(ctx.io.env)
     updateConfig(path, { BASE_URL: start.base_url, CONTENT_URL: start.content_url, UPLOAD_TOKEN: r.token })
     ctx.note(`logged in as ${r.email}; token saved to ${path}`)
     ctx.emit({ email: r.email, name: r.name, base_url: start.base_url, content_url: start.content_url, config: path })

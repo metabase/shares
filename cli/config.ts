@@ -29,6 +29,11 @@ export function configPath(env: Env = process.env): string {
   return !existsSync(path) && existsSync(old) ? old : path
 }
 
+// Where `share login` saves the token: SHARE_CONF, else ~/.config/shares/config even when only the old mb-shares file exists.
+export function loginConfigPath(env: Env = process.env): string {
+  return env.SHARE_CONF || join(env.HOME || homedir(), '.config/shares/config')
+}
+
 export function parseConfig(text: string): Record<string, string> {
   const out: Record<string, string> = {}
   for (const line of text.split('\n')) {
