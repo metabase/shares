@@ -11,12 +11,22 @@ export function b64url(bytes: ArrayBuffer | Uint8Array) {
 const b64email = (email: string) => b64url(new TextEncoder().encode(email))
 const unb64 = (s: string) => atob(s.replace(/-/g, '+').replace(/_/g, '/'))
 
+const hmacKey = (env: Env, usage: 'sign' | 'verify') => crypto.subtle.importKey(
+  'raw', new TextEncoder().encode(env.SESSION_SECRET),
+  { name: 'HMAC', hash: 'SHA-256' }, false, [usage],
+)
+
 export async function hmac(env: Env, data: string) {
-  const key = await crypto.subtle.importKey(
-    'raw', new TextEncoder().encode(env.SESSION_SECRET),
-    { name: 'HMAC', hash: 'SHA-256' }, false, ['sign'],
-  )
-  return b64url(await crypto.subtle.sign('HMAC', key, new TextEncoder().encode(data)))
+  return b64url(await crypto.subtle.sign('HMAC', await hmacKey(env, 'sign'), new TextEncoder().encode(data)))
+}
+
+// Checks sig with crypto.subtle.verify, which compares in constant time.
+async function hmacMatches(env: Env, data: string, sig: string) {
+  let bytes: Uint8Array
+  try { bytes = Uint8Array.from(unb64(sig), (c) => c.charCodeAt(0)) } catch { return false }
+  // atob ignores the spare bits of the last character, so several spellings decode to the same bytes.
+  if (bytes.length !== 32 || b64url(bytes) !== sig) return false
+  return crypto.subtle.verify('HMAC', await hmacKey(env, 'verify'), bytes, new TextEncoder().encode(data))
 }
 
 // The caller of a bearer request. CLI and service tokens live in D1
@@ -47,7 +57,7 @@ export async function verifyEmail(env: Env, value: string, tag = ''): Promise<st
   const [emailB64, exp, sig] = parts
   if (parts.length !== 3 || !emailB64 || !/^\d+$/.test(exp) || !sig) return null
   if (Number(exp) < Date.now() / 1000) return null
-  if (sig !== await hmac(env, `${tag}${emailB64}.${exp}`)) return null
+  if (!await hmacMatches(env, `${tag}${emailB64}.${exp}`, sig)) return null
   try { return unb64(emailB64) } catch { return null }
 }
 
