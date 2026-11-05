@@ -11,6 +11,7 @@ import { contentBase } from '../origins'
 import { isQueryStore, StoreError, type QueryStore, type ShareStore } from '../store'
 import type { Collection, ShareInfo, VersionInfo } from '../api-types'
 import { asText, hunks, lineDiff } from './diff'
+import { uploadToken, uploadUi } from './upload'
 
 // one old file shown as text; bigger files show their size only
 const MAX_SHOW = 1_000_000
@@ -52,10 +53,10 @@ export async function sharePage(url: URL, env: Env, store: ShareStore, email: st
   const meta = Object.keys(share.meta).length
     ? `<div class="meta"><span>Meta</span><pre>${esc(JSON.stringify(share.meta, null, 2))}</pre></div>` : ''
   const title = share.title || slug
-  return page(title, `${STYLE}<div class="app sh">${nav(email, env, 'shares')}${q.has('moved') ? movedNotice(share.collection) : ''}
+  return page(title, `${STYLE}<div class="app sh">${nav(email, env, 'shares')}${q.has('moved') ? movedNotice(share.collection) : ''}${q.has('published') ? publishedNotice(q.get('published'), content) : ''}
 <div class="top"><div><h1 title="${esc(title)}">${esc(title)}</h1>
 <p class="slugline">${slugLine(slug, share.collection)}</p></div>
-<div class="acts">${copyLink(content)}${iconLink(`${content}_zip`, 'download', 'Download zip')}<a class="btn pri" href="${esc(content)}">Open</a></div></div>
+<div class="acts">${manage && store.commit ? uploadUi({ token: await uploadToken(env, email), mode: 'version', slug }) : ''}${copyLink(content)}${iconLink(`${content}_zip`, 'download', 'Download zip')}<a class="btn pri" href="${esc(content)}">Open</a></div></div>
 <dl class="strip">
 <div><dt>Owner</dt><dd>${person(share.owner, true)}</dd></div>
 <div><dt>Collection</dt><dd>${share.collection ? `<a href="/?c=${encodeURIComponent(share.collection)}">${esc(share.collection)}</a>` : '—'}</dd></div>
@@ -73,6 +74,14 @@ ${manage ? `<h2>Views</h2>${viewRows.length
 ${manageForms(share, self, email, env, collections)}` : ''}
 </div>
 `, { poll: false })
+}
+
+// after an upload from the web app: the new version and its link
+function publishedNotice(v: string | null, content: string) {
+  const n = Number(v)
+  return `<div class="moved mvrow" data-pub="${Number.isInteger(n) ? n : ''}"><span>Published${Number.isInteger(n) && n > 0 ? ` v${n}` : ''}.</span>
+<span class="chip">${esc(content)}</span>${copyLink(content)}</div>
+<script>appToast('Published' + (document.querySelector('[data-pub]').dataset.pub ? ' v' + document.querySelector('[data-pub]').dataset.pub : ''), 2500)</script>`
 }
 
 // The slug as a path under its collection; the collection part links to

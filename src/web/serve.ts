@@ -8,6 +8,7 @@ import { contentBase, hostKind } from '../origins'
 import { approvePage, tokenPage } from './tokens'
 import { collectionsPage, sharePage } from './manage'
 import { ICON, STYLE, copyLink, iconLink, nav, person, recency, when } from './shell'
+import { uploadToken, uploadUi } from './upload'
 
 const summary = (s: ShareInfo): [string, ShareSummary] =>
   [s.slug, { n: s.fileCount, t: s.updatedAt, o: s.owner, ...(s.title ? { title: s.title } : {}) }]
@@ -72,8 +73,12 @@ export async function serve(url: URL, email: string | null, env: Env, store: Sha
     const scope = isAdmin && !c
       ? `<div class="scope" role="group" aria-label="Scope"><a href="/?mine${qs ? `&${qs}` : ''}"${admin ? '' : ' class="on" aria-current="true"'}>Mine</a><a href="/${qs ? `?${qs}` : ''}"${admin ? ' class="on" aria-current="true"' : ''}>Everyone</a></div>`
       : ''
+    // new share by upload; in a collection view it lands in that collection
+    const up = query?.commit ? `<span class="hdup">${uploadUi({ token: await uploadToken(env, email!), mode: 'new', collection: c || undefined })}</span>` : ''
     const title = c ? `Collection <code>${esc(c)}</code>` : q ? 'Search' : admin ? 'Shares' : 'My shares'
     return page(c ? 'Collection' : q ? 'Search' : admin ? 'Shares' : 'My shares', `<style>
+  .hd .hdup{margin-left:auto}
+  .hd .scope+.hdup{margin-left:0}
   #q{width:100%;box-sizing:border-box;font:inherit;font-size:.9rem;padding:.5rem .75rem;
     background:var(--code-bg);color:var(--fg);border:1px solid var(--border);
     border-radius:6px;margin:0 0 .75rem}
@@ -95,7 +100,7 @@ export async function serve(url: URL, email: string | null, env: Env, store: Sha
     max-width:none;font-size:.75rem;line-height:1.4;white-space:pre-wrap;overflow:hidden}
 </style>
 ${STYLE}<div class="app">${nav(email!, env, 'shares')}
-<div class="hd"><h1>${title}</h1>${scope}</div>
+<div class="hd"><h1>${title}</h1>${scope}${up}</div>
 <form method="get" action="/">${admin ? '' : isAdmin ? '<input type="hidden" name="mine" value="">' : ''}
 <input id="q" name="q" value="${esc(q)}" placeholder="Search shares" aria-label="Search shares" autofocus></form>
 ${rows.length ? `<div class="scroll"><table class="lst">${head}<tbody id="shares">${rows.join('')}</tbody></table></div>` : `<p class="sub">${q || c ? 'No match.' : 'No shares yet.'}</p>`}
