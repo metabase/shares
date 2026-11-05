@@ -1,6 +1,6 @@
 import { env } from 'cloudflare:workers'
 import { describe, expect, it } from 'vitest'
-import { COOKIE, CONTENT_TAG, signEmail, ticketTag } from '../src/auth'
+import { COOKIE, CONTENT_TAG, newTicketNonce, signEmail, ticketTag } from '../src/auth'
 import { APP, CONTENT, api, fetchWorker, publish, slug, userToken } from './helpers'
 
 const NAV = { 'sec-fetch-mode': 'navigate', 'sec-fetch-dest': 'document', accept: 'text/html,*/*' }
@@ -20,7 +20,64 @@ function cookieOf(res: Response) {
   return (res.headers.get('set-cookie') || '').split(';')[0]
 }
 
+// the /_auth URL on the content host that the app host login sends a signed-in viewer to
+async function ticketUrl(to: string) {
+  const login = await onApp(`/_login?to=${encodeURIComponent(to)}`,
+    { headers: { ...NAV, cookie: await appCookie('pat@metabase.com') } })
+  return new URL(login.headers.get('location')!)
+}
+
+// an /_auth path with a ticket for `to` that the test signs the way the app host does
+async function signedTicket(to: string, ttl = 60, nonce = newTicketNonce()) {
+  const t = await signEmail(env, 'pat@metabase.com', ttl, ticketTag(`${CONTENT}${to}`, nonce))
+  return `/_auth?to=${encodeURIComponent(to)}&n=${nonce}&t=${t}`
+}
+
 describe('content host login', () => {
+  it('redeems a ticket once and refuses it the second time like an expired one', async () => {
+    const next = await ticketUrl('/once/')
+    const first = await onContent(next.pathname + next.search)
+    expect(first.status).toBe(302)
+    expect(first.headers.get('set-cookie')).toMatch(/^__Host-c=/)
+
+    const again = await onContent(next.pathname + next.search)
+    const expired = await onContent(await signedTicket('/once/', -1))
+    expect(again.status).toBe(403)
+    expect(again.headers.get('set-cookie')).toBeNull()
+    expect([again.status, await again.text()]).toEqual([expired.status, await expired.text()])
+  })
+
+  it('gives each login its own ticket, so two logins to one path both redeem', async () => {
+    const [one, two] = [await ticketUrl('/twice/'), await ticketUrl('/twice/')]
+    expect(one.searchParams.get('n')).not.toBe(two.searchParams.get('n'))
+    for (const next of [one, two]) expect((await onContent(next.pathname + next.search)).status).toBe(302)
+  })
+
+  it('deletes the used nonces of expired tickets on the next redeem', async () => {
+    await env.DB.prepare('INSERT INTO used_tickets (nonce, expires_at) VALUES (?, ?)').bind('old', Date.now() - 1).run()
+    const next = await ticketUrl('/clean/')
+    await onContent(next.pathname + next.search)
+    expect(await env.DB.prepare("SELECT nonce FROM used_tickets WHERE nonce = 'old'").first()).toBeNull()
+  })
+
+  it('refuses a ticket whose nonce was changed and still redeems the real one', async () => {
+    const next = await ticketUrl('/nonce/')
+    const forged = new URL(next)
+    forged.searchParams.set('n', newTicketNonce())
+    expect((await onContent(forged.pathname + forged.search)).status).toBe(403)
+    expect((await onContent(next.pathname + next.search)).status).toBe(302)
+  })
+
+  it('refuses a nonce with a dot that moves where the signed target starts', async () => {
+    const next = await ticketUrl(`/x.${CONTENT}/y`)
+    expect((await onContent(next.pathname + next.search)).status).toBe(302)
+    // The ticket signs tkt.<n>.<CONTENT>/x.<CONTENT>/y.
+    // That is also the tag of the nonce <n>.<CONTENT>/x with the target <CONTENT>/y.
+    const shifted = `${next.searchParams.get('n')}.${CONTENT}/x`
+    const r = await onContent(`/_auth?to=%2Fy&n=${encodeURIComponent(shifted)}&t=${next.searchParams.get('t')}`)
+    expect(r.status).toBe(403)
+  })
+
   it('sends a viewer without a content cookie to the app host login with the target path', async () => {
     const r = await onContent('/some-share/a.md?x=1', { headers: NAV })
     expect(r.status).toBe(302)
@@ -60,22 +117,21 @@ describe('content host login', () => {
   })
 
   it('accepts a ticket only for the target it was issued for', async () => {
-    const t = await signEmail(env, 'pat@metabase.com', 60, ticketTag(`${CONTENT}/a/`))
-    const ok = await onContent(`/_auth?to=${encodeURIComponent('/a/')}&t=${t}`)
-    expect(ok.status).toBe(302)
-    const other = await onContent(`/_auth?to=${encodeURIComponent('/b/')}&t=${t}`)
+    const ok = await signedTicket('/a/')
+    const other = await onContent(ok.replace(`to=${encodeURIComponent('/a/')}`, `to=${encodeURIComponent('/b/')}`))
     expect(other.status).toBe(403)
     expect(other.headers.get('set-cookie')).toBeNull()
+    expect((await onContent(ok)).status).toBe(302)
   })
 
   it('refuses an expired ticket', async () => {
-    const t = await signEmail(env, 'pat@metabase.com', -1, ticketTag(`${CONTENT}/a/`))
-    expect((await onContent(`/_auth?to=${encodeURIComponent('/a/')}&t=${t}`)).status).toBe(403)
+    const r = await onContent(await signedTicket('/a/', -1))
+    expect(r.status).toBe(403)
+    expect(r.headers.get('set-cookie')).toBeNull()
   })
 
   it('refuses a ticket target that leaves the content host', async () => {
-    const t = await signEmail(env, 'pat@metabase.com', 60, ticketTag(`${CONTENT}//evil.test/`))
-    expect((await onContent(`/_auth?to=${encodeURIComponent('//evil.test/')}&t=${t}`)).status).toBe(403)
+    expect((await onContent(await signedTicket('//evil.test/'))).status).toBe(403)
     const bad = await onApp(`/_login?to=${encodeURIComponent('//evil.test/')}`,
       { headers: { ...NAV, cookie: await appCookie('pat@metabase.com') } })
     expect(bad.status).toBe(400)
@@ -83,7 +139,7 @@ describe('content host login', () => {
 
   it('does not accept an app session or a ticket as the content cookie', async () => {
     const app = await signEmail(env, 'pat@metabase.com', 3600)
-    const tkt = await signEmail(env, 'pat@metabase.com', 60, ticketTag(`${CONTENT}/a/`))
+    const tkt = await signEmail(env, 'pat@metabase.com', 60, ticketTag(`${CONTENT}/a/`, newTicketNonce()))
     for (const v of [app, tkt]) {
       const r = await onContent('/a/', { headers: { ...NAV, cookie: `${COOKIE.content}=${v}` } })
       expect(r.status).toBe(302)

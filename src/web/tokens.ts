@@ -26,11 +26,11 @@ const origins = (url: URL, env: Env) => ({
 export async function deviceApi(req: Request, url: URL, env: Env): Promise<Response | null> {
   if (req.method !== 'POST' || (url.pathname !== '/_device/code' && url.pathname !== '/_device/token')) return null
   if (env.PUBLIC || !env.DB) return new Response('not found\n', { status: 404 })
-  let body: { name?: unknown; device_code?: unknown }
+  let body: { name?: unknown; device_code?: unknown } | null
   try { body = await req.json() } catch { return new Response('bad json\n', { status: 400 }) }
 
   if (url.pathname === '/_device/code') {
-    const { deviceCode, userCode } = await startDevice(env, typeof body.name === 'string' ? body.name : '')
+    const { deviceCode, userCode } = await startDevice(env, typeof body?.name === 'string' ? body.name : '')
     const { app, content } = origins(url, env)
     const verify = `${app}${approvePath(url, env)}`
     return Response.json({
@@ -45,7 +45,7 @@ export async function deviceApi(req: Request, url: URL, env: Env): Promise<Respo
     } satisfies DeviceStartResponse)
   }
 
-  if (typeof body.device_code !== 'string') return new Response('device_code missing\n', { status: 400 })
+  if (typeof body?.device_code !== 'string') return new Response('device_code missing\n', { status: 400 })
   const r = await pollDevice(env, body.device_code)
   return Response.json(r satisfies DeviceTokenResponse, { status: 'error' in r ? 400 : 200 })
 }
@@ -133,7 +133,7 @@ ${codeBlock(created.token)}
     : created
     ? `<div class="box new"><h2>New token <code>${esc(created.name)}</code></h2>
 <p>Shown once. This line saves it as the <code>share</code> config:</p>
-${codeBlock(`mkdir -p ~/.config/shares && (umask 077; printf 'BASE_URL=%s\\nCONTENT_URL=%s\\nUPLOAD_TOKEN=%s\\n' '${app}' '${content}' '${created.token}' > ~/.config/shares/config)`)}
+${codeBlock(`(umask 077; mkdir -p ~/.config/shares && rm -f ~/.config/shares/config && printf 'BASE_URL=%s\\nCONTENT_URL=%s\\nUPLOAD_TOKEN=%s\\n' '${app}' '${content}' '${created.token}' > ~/.config/shares/config)`)}
 </div>`
     : ''
   return page('Install', `${STYLE}

@@ -10,7 +10,7 @@ import type {
   ServiceTokenInfo, TokenInfo, VersionInfo, WhoAmI,
 } from '../src/api-types'
 import { filePathUrl, parseLines, parseViews } from '../src/api-types'
-import { DEFAULT_APP, loadConfig, updateConfig, type Config } from './config'
+import { DEFAULT_APP, loadConfig, loginConfigPath, updateConfig, type Config } from './config'
 import { collect, defaultName, deslug, localCopy, localPath, mirror, randomSuffix, readBytes, sha256, type LocalFile } from './files'
 import { client, HttpError, pool, sleep, UsageError, type Client } from './http'
 
@@ -163,6 +163,9 @@ class Ctx {
   emit(v: unknown) { if (this.opts.json) this.io.stdout(JSON.stringify(v) + '\n') }
 
   get api(): Client {
+    if (this.cfg.savedTokenUrl) {
+      throw new UsageError(`the token in ${this.cfg.path} is for ${this.cfg.savedTokenUrl}: set SHARES_TOKEN to a token for ${this.cfg.baseUrl}`)
+    }
     if (!this.cfg.baseUrl || !this.cfg.token) {
       throw new UsageError(`not logged in: run \`share login\` (config ${this.cfg.path})`)
     }
@@ -191,7 +194,7 @@ class Ctx {
   // raw bytes of one share file; path = "<slug>/<file>"
   async bytes(path: string) {
     const res = await this.api.request('GET', filePathUrl('', path))
-    if (!res.ok) throw new HttpError(res.status, await res.text(), `GET /${path}`)
+    if (!res.ok) throw new HttpError(res.status, await res.text(), `GET /${path}`, true)
     return new Uint8Array(await res.arrayBuffer())
   }
 }
@@ -213,7 +216,10 @@ export async function main(argv: string[], io: Io): Promise<number> {
     else await publish(ctx, args)
     return 0
   } catch (e) {
-    const msg = (e as Error).message
+    const refused = e instanceof HttpError && e.status === 401 && e.sentToken
+    const msg = !refused ? (e as Error).message
+      : io.env.SHARES_TOKEN ? 'the server refused the token in SHARES_TOKEN'
+      : 'the server refused the saved token: run `share login` again'
     if (json) io.stdout(JSON.stringify({ error: msg, ...(e instanceof HttpError ? { status: e.status } : {}) }) + '\n')
     io.stderr(`share: ${msg}\n`)
     return e instanceof UsageError ? 2 : 1
@@ -502,7 +508,7 @@ async function login(ctx: Ctx, arg?: string) {
       if (r.error === 'expired_token') break
       throw new Error(`login failed: ${r.error}`)
     }
-    const path = ctx.io.env.SHARE_CONF || join(ctx.io.env.HOME || '', '.config/shares/config')
+    const path = loginConfigPath(ctx.io.env)
     updateConfig(path, { BASE_URL: start.base_url, CONTENT_URL: start.content_url, UPLOAD_TOKEN: r.token })
     ctx.note(`logged in as ${r.email}; token saved to ${path}`)
     ctx.emit({ email: r.email, name: r.name, base_url: start.base_url, content_url: start.content_url, config: path })

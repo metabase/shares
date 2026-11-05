@@ -1,6 +1,6 @@
 import { env } from 'cloudflare:workers'
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { b64url, idTokenEmail, verifyEmail, type IdClaims } from '../src/auth'
+import { b64url, hmac, idTokenEmail, signEmail, verifyEmail, type IdClaims } from '../src/auth'
 import { APP, fetchWorker } from './helpers'
 
 const claims = (over: IdClaims = {}): IdClaims => ({
@@ -48,6 +48,47 @@ describe('id_token claims', () => {
     ['no email', { email: undefined }],
   ])('refuses %s', (_, over) => {
     expect(idTokenEmail(claims(over), env)).toBeNull()
+  })
+})
+
+describe('a signed session or ticket value', () => {
+  const emailB64 = b64url(new TextEncoder().encode('pat@metabase.com'))
+
+  it('verifies as signed', async () => {
+    expect(await verifyEmail(env, await signEmail(env, 'pat@metabase.com', 60))).toBe('pat@metabase.com')
+  })
+
+  it('refuses a fourth segment after a valid value', async () => {
+    expect(await verifyEmail(env, `${await signEmail(env, 'pat@metabase.com', 60)}.anything`)).toBeNull()
+  })
+
+  // Number() reads each of these as a time far in the future,
+  // so only the digits test refuses them once they carry a valid signature.
+  it.each(['Infinity', '1e12', '0x7fffffff'])('refuses a signed exp of %s', async (exp) => {
+    expect(await verifyEmail(env, `${emailB64}.${exp}.${await hmac(env, `${emailB64}.${exp}`)}`)).toBeNull()
+  })
+
+  it('refuses a signature spelled another way', async () => {
+    const value = await signEmail(env, 'pat@metabase.com', 60)
+    const alphabet = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_'
+    // The last character carries two spare bits,
+    // so flipping one leaves the decoded signature as it was.
+    const last = alphabet[alphabet.indexOf(value.at(-1)!) ^ 1]
+    expect(await verifyEmail(env, `${value.slice(0, -1)}${last}`)).toBeNull()
+  })
+
+  const bytesOf = (s: string) => Uint8Array.from(atob(s.replace(/-/g, '+').replace(/_/g, '/')), (c) => c.charCodeAt(0))
+
+  it.each<[string, (sig: string) => string]>([
+    ['a signature that is not base64', () => '%%%'],
+    ['a valid signature cut to 31 bytes', (sig) => b64url(bytesOf(sig).slice(0, 31))],
+    ['a valid signature with a 33rd byte', (sig) => b64url(new Uint8Array([...bytesOf(sig), 0]))],
+    // Two million characters decode to 1.5 million bytes,
+    // more than V8 lets one call take as spread arguments.
+    ['a signature of two million characters', () => 'A'.repeat(2_000_000)],
+  ])('refuses %s', async (_, resize) => {
+    const [e, exp, sig] = (await signEmail(env, 'pat@metabase.com', 60)).split('.')
+    expect(await verifyEmail(env, `${e}.${exp}.${resize(sig)}`)).toBeNull()
   })
 })
 

@@ -2,7 +2,7 @@
 // 429 and 5xx twice, like `curl --retry 2` in the bash CLI.
 
 export class HttpError extends Error {
-  constructor(readonly status: number, readonly body: string, readonly url: string) {
+  constructor(readonly status: number, readonly body: string, readonly url: string, readonly sentToken = false) {
     super(`${status} ${body.trim() || 'error'} (${url})`)
   }
 }
@@ -49,7 +49,7 @@ export function client(base: string, token?: string): Client {
     async text(method, path, init) {
       const res = await c.request(method, path, init)
       const text = await res.text()
-      if (!res.ok) throw new HttpError(res.status, errorText(text), `${method} ${path}`)
+      if (!res.ok) throw new HttpError(res.status, errorText(text), `${method} ${path}`, init?.auth !== false && !!token)
       return text
     },
     async json(method, path, init) {

@@ -1,10 +1,10 @@
 import { mkdirSync, mkdtempSync, readFileSync, statSync, symlinkSync, writeFileSync } from 'node:fs'
-import { tmpdir } from 'node:os'
-import { join } from 'node:path'
-import { describe, expect, it } from 'vitest'
-import { loadConfig, parseConfig, updateConfig } from '../config'
+import { homedir, tmpdir } from 'node:os'
+import { dirname, join } from 'node:path'
+import { afterEach, describe, expect, it, vi } from 'vitest'
+import { loadConfig, loginConfigPath, parseConfig, updateConfig } from '../config'
 import { collect, defaultName, deslug, localCopy, mirror } from '../files'
-import { loginBase, parseArgs } from '../main'
+import { loginBase, main, parseArgs } from '../main'
 
 const tmp = () => mkdtempSync(join(tmpdir(), 'share-unit-'))
 
@@ -122,12 +122,35 @@ describe('config', () => {
     expect(loginBase(undefined, env, loadConfig(env))).toBe('https://mine')
   })
 
+  it('saves the login under the home directory when HOME is unset', () => {
+    expect(loginConfigPath({})).toBe(join(homedir(), '.config/shares/config'))
+  })
+
+  it('saves the login to the new config while the old mb-shares env file is read', () => {
+    const home = tmp()
+    mkdirSync(join(home, '.config/mb-shares'), { recursive: true })
+    writeFileSync(join(home, '.config/mb-shares/env'), 'BASE_URL=https://old/\nUPLOAD_TOKEN=t\n')
+    expect(loginConfigPath({ HOME: home })).toBe(join(home, '.config/shares/config'))
+  })
+
   it('lets SHARES_TOKEN and SHARES_URL win over the file', () => {
     const home = tmp()
     const conf = join(home, 'c')
     writeFileSync(conf, 'BASE_URL=https://file\nUPLOAD_TOKEN=file\n')
     expect(loadConfig({ HOME: home, SHARE_CONF: conf, SHARES_TOKEN: 'env', SHARES_URL: 'https://env' }))
       .toMatchObject({ baseUrl: 'https://env', token: 'env' })
+  })
+
+  it('withholds the saved token from another server that SHARES_URL names', () => {
+    const home = tmp()
+    const conf = join(home, 'c')
+    writeFileSync(conf, 'BASE_URL=https://app.shares.test\nUPLOAD_TOKEN=file\n')
+    const env = { HOME: home, SHARE_CONF: conf }
+    for (const url of ['http://localhost:8787', 'http://app.shares.test', 'https://app.shares.test:8443']) {
+      expect(loadConfig({ ...env, SHARES_URL: url }))
+        .toMatchObject({ baseUrl: url, token: undefined, savedTokenUrl: 'https://app.shares.test' })
+    }
+    expect(loadConfig({ ...env, SHARES_URL: 'https://app.shares.test/' })).toMatchObject({ token: 'file', savedTokenUrl: undefined })
   })
 
   it('updates keys in place, keeps other lines and writes mode 0600', () => {
@@ -137,6 +160,66 @@ describe('config', () => {
     updateConfig(p, { UPLOAD_TOKEN: undefined })
     expect(readFileSync(p, 'utf8')).toBe('BASE_URL=https://a\nMIRROR_DIR=/m\n')
     expect(statSync(p).mode & 0o777).toBe(0o600)
+  })
+
+  it('makes a new config directory open to its owner only', () => {
+    const p = join(tmp(), 'sub/config')
+    updateConfig(p, { UPLOAD_TOKEN: 't' })
+    expect(statSync(dirname(p)).mode & 0o777).toBe(0o700)
+  })
+})
+
+// `share <argv>` with a saved login, against a server that answers every request with 401
+async function refusedRun(argv: string[], env: Record<string, string> = {}) {
+  const home = tmp()
+  mkdirSync(join(home, '.config/shares'), { recursive: true })
+  writeFileSync(join(home, '.config/shares/config'), 'BASE_URL=https://app.shares.test\nUPLOAD_TOKEN=shr_revoked\n')
+  vi.spyOn(globalThis, 'fetch').mockImplementation(async () => new Response('unauthorized\n', { status: 401 }))
+  let stdout = ''
+  let stderr = ''
+  const code = await main(argv, {
+    stdout: (s) => { stdout += String(s) },
+    stderr: (s) => { stderr += s },
+    stdin: async () => new Uint8Array(),
+    env: { HOME: home, ...env },
+    cwd: home,
+  })
+  return { code, stdout, stderr }
+}
+
+describe('a token the server refuses', () => {
+  afterEach(() => { vi.restoreAllMocks() })
+
+  it.each([['whoami'], ['cat', 'x-a3f2b/a.md']])('tells the user to log in again on %s', async (...argv) => {
+    const r = await refusedRun(argv)
+    expect(r.stderr).toBe('share: the server refused the saved token: run `share login` again\n')
+    expect(r.code).toBe(1)
+  })
+
+  it('keeps the 401 status in --json', async () => {
+    const r = await refusedRun(['--json'])
+    expect(JSON.parse(r.stdout)).toMatchObject({ status: 401, error: expect.stringContaining('share login') })
+  })
+
+  it('names SHARES_TOKEN when the token came from it', async () => {
+    const r = await refusedRun(['whoami'], { SHARES_TOKEN: 'shr_env' })
+    expect(r.stderr).toBe('share: the server refused the token in SHARES_TOKEN\n')
+  })
+
+  it('reports a 401 to login itself as the server sent it', async () => {
+    const r = await refusedRun(['login', 'https://old.test'], { SHARE_NO_BROWSER: '1' })
+    expect(r.stderr).toBe('share: 401 unauthorized (POST /_device/code)\n')
+  })
+})
+
+describe('the saved token and SHARES_URL', () => {
+  afterEach(() => { vi.restoreAllMocks() })
+
+  it('sends no request to another server and says how to give it a token', async () => {
+    const r = await refusedRun(['whoami'], { SHARES_URL: 'http://localhost:8787' })
+    expect(globalThis.fetch).not.toHaveBeenCalled()
+    expect(r.stderr).toMatch(/^share: the token in \S+ is for https:\/\/app\.shares\.test: set SHARES_TOKEN to a token for http:\/\/localhost:8787\n$/)
+    expect(r.code).toBe(2)
   })
 })
 

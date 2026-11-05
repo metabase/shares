@@ -11,12 +11,23 @@ export function b64url(bytes: ArrayBuffer | Uint8Array) {
 const b64email = (email: string) => b64url(new TextEncoder().encode(email))
 const unb64 = (s: string) => atob(s.replace(/-/g, '+').replace(/_/g, '/'))
 
+const hmacKey = (env: Env, usage: 'sign' | 'verify') => crypto.subtle.importKey(
+  'raw', new TextEncoder().encode(env.SESSION_SECRET),
+  { name: 'HMAC', hash: 'SHA-256' }, false, [usage],
+)
+
 export async function hmac(env: Env, data: string) {
-  const key = await crypto.subtle.importKey(
-    'raw', new TextEncoder().encode(env.SESSION_SECRET),
-    { name: 'HMAC', hash: 'SHA-256' }, false, ['sign'],
-  )
-  return b64url(await crypto.subtle.sign('HMAC', key, new TextEncoder().encode(data)))
+  return b64url(await crypto.subtle.sign('HMAC', await hmacKey(env, 'sign'), new TextEncoder().encode(data)))
+}
+
+// Checks sig with crypto.subtle.verify, which compares in constant time.
+async function hmacMatches(env: Env, data: string, sig: string) {
+  let bytes: Uint8Array
+  try { bytes = Uint8Array.from(unb64(sig), (c) => c.charCodeAt(0)) } catch { return false }
+  // atob ignores the spare bits of the last character,
+  // so several spellings decode to the same bytes.
+  if (bytes.length !== 32 || b64url(bytes) !== sig) return false
+  return crypto.subtle.verify('HMAC', await hmacKey(env, 'verify'), bytes, new TextEncoder().encode(data))
 }
 
 // The caller of a bearer request. CLI and service tokens live in D1
@@ -24,9 +35,15 @@ export async function hmac(env: Env, data: string) {
 // ADMIN_EMAIL and cannot be revoked.
 export type Caller = TokenCaller | { kind: 'user'; email: string; id: null }
 
+// timingSafeEqual needs two inputs of one length, so it compares the SHA-256 of each.
+async function sameSecret(a: string, b: string) {
+  const digest = (s: string) => crypto.subtle.digest('SHA-256', new TextEncoder().encode(s))
+  return crypto.subtle.timingSafeEqual(await digest(a), await digest(b))
+}
+
 export async function authenticate(env: Env, bearer: string): Promise<Caller | null> {
   if (!bearer) return null
-  if (env.UPLOAD_TOKEN && bearer === env.UPLOAD_TOKEN) return { kind: 'user', email: env.ADMIN_EMAIL, id: null }
+  if (env.UPLOAD_TOKEN && await sameSecret(bearer, env.UPLOAD_TOKEN)) return { kind: 'user', email: env.ADMIN_EMAIL, id: null }
   // PUBLIC has no login, so no personal tokens: UPLOAD_TOKEN is the only writer
   if (env.PUBLIC) return null
   return verifyToken(env, bearer)
@@ -43,10 +60,11 @@ export async function signEmail(env: Env, email: string, ttl: number, tag = '') 
 }
 
 export async function verifyEmail(env: Env, value: string, tag = ''): Promise<string | null> {
-  const [emailB64, exp, sig] = value.split('.')
-  if (!emailB64 || !exp || !sig) return null
+  const parts = value.split('.')
+  const [emailB64, exp, sig] = parts
+  if (parts.length !== 3 || !emailB64 || !/^\d+$/.test(exp) || !sig) return null
   if (Number(exp) < Date.now() / 1000) return null
-  if (sig !== await hmac(env, `${tag}${emailB64}.${exp}`)) return null
+  if (!await hmacMatches(env, `${tag}${emailB64}.${exp}`, sig)) return null
   try { return unb64(emailB64) } catch { return null }
 }
 
@@ -73,11 +91,25 @@ export function setCookie(name: string, value: string, maxAge: number) {
   return `${name}=${value}; Path=/; HttpOnly; Secure; SameSite=Lax; Max-Age=${maxAge}`
 }
 
-// Login ticket: the app host signs the viewer's email and the target URL on
-// the content host, valid TICKET_SECONDS. The content host accepts it only
-// for that exact target, then sets its own cookie.
+// Login ticket: the app host signs the viewer's email, a random nonce and the content host target URL.
+// The content host accepts it once, for that exact target, within TICKET_SECONDS.
 export const TICKET_SECONDS = 60
-export const ticketTag = (target: string) => `tkt.${target}.`
+export const ticketTag = (target: string, nonce: string) => `tkt.${nonce}.${target}.`
+export const newTicketNonce = () => b64url(crypto.getRandomValues(new Uint8Array(16)))
+// A nonce has no dot, so it cannot move where the target starts in ticketTag.
+export const isTicketNonce = (nonce: string) => /^[\w-]{22}$/.test(nonce)
+
+// true the first time a ticket's nonce is redeemed.
+// The row expires TICKET_SECONDS after the redeem, which is after the ticket itself expires.
+export async function redeemTicket(env: Env, nonce: string) {
+  const now = Date.now()
+  const [, insert] = await env.DB.batch([
+    env.DB.prepare('DELETE FROM used_tickets WHERE expires_at < ?').bind(now),
+    env.DB.prepare('INSERT OR IGNORE INTO used_tickets (nonce, expires_at) VALUES (?, ?)')
+      .bind(nonce, now + TICKET_SECONDS * 1000),
+  ])
+  return insert.meta.changes > 0
+}
 
 export function redirectToGoogle(url: URL, env: Env) {
   const auth = new URL('https://accounts.google.com/o/oauth2/v2/auth')

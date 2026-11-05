@@ -1,7 +1,7 @@
 import type { Env } from './env'
 import {
   COOKIE, CONTENT_TAG, SESSION_DAYS, TICKET_SECONDS, devLogin, handleCallback, redirectToGoogle, sessionEmail,
-  authenticate, setCookie, signEmail, ticketTag, verifyEmail,
+  authenticate, isTicketNonce, newTicketNonce, redeemTicket, setCookie, signEmail, ticketTag, verifyEmail,
 } from './auth'
 import { cli } from './api/cli'
 import { serviceApi } from './api/service'
@@ -174,15 +174,17 @@ export async function contentHost(req: Request, env: Env, ctx: ExecutionContext)
   return res
 }
 
-// /_auth?to=PATH&t=TICKET: the last step of the content host login. The
-// ticket is valid only for this origin + PATH; the response sets the
-// host-only content cookie and goes on to PATH.
+// /_auth?to=PATH&n=NONCE&t=TICKET: the last step of the content host login.
+// The response sets the host-only content cookie and goes on to PATH.
 async function acceptTicket(url: URL, env: Env) {
   const to = url.searchParams.get('to') || ''
-  const email = isLocalPath(to)
-    ? await verifyEmail(env, url.searchParams.get('t') || '', ticketTag(url.origin + to))
+  const nonce = url.searchParams.get('n') || ''
+  const email = isLocalPath(to) && isTicketNonce(nonce)
+    ? await verifyEmail(env, url.searchParams.get('t') || '', ticketTag(url.origin + to, nonce))
     : null
-  if (!email) return new Response('login ticket invalid or expired; reload the share\n', { status: 403 })
+  if (!email || !await redeemTicket(env, nonce)) {
+    return new Response('login ticket invalid or expired; reload the share\n', { status: 403 })
+  }
   const cookie = await signEmail(env, email, SESSION_DAYS * 86400, CONTENT_TAG)
   return new Response(null, {
     status: 302,
@@ -236,9 +238,11 @@ async function appRoutes(req: Request, env: Env): Promise<Response> {
     const to = url.searchParams.get('to') || '/'
     if (!isLocalPath(to)) return new Response('bad target\n', { status: 400 })
     const target = contentBase(url, env) + to
-    const t = await signEmail(env, email, TICKET_SECONDS, ticketTag(target))
+    const nonce = newTicketNonce()
+    const t = await signEmail(env, email, TICKET_SECONDS, ticketTag(target, nonce))
     const next = new URL(`${contentBase(url, env)}/_auth`)
     next.searchParams.set('to', to)
+    next.searchParams.set('n', nonce)
     next.searchParams.set('t', t)
     return new Response(null, {
       status: 302,

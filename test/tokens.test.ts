@@ -78,6 +78,14 @@ describe('CLI tokens', () => {
     expect(row!.revoked_at).toBeNull()
   })
 
+  it('accepts the shared UPLOAD_TOKEN only when it matches exactly', async () => {
+    const up = env.UPLOAD_TOKEN!
+    expect((await list(up)).status).toBe(200)
+    for (const t of [up.slice(0, -1), `${up}x`, `${up.slice(0, -1)}X`]) {
+      expect((await list(t)).status).toBe(401)
+    }
+  })
+
   it('refuses to revoke the shared UPLOAD_TOKEN', async () => {
     const r = await onApp('/_api/tokens/current', { method: 'DELETE', headers: bearer(env.UPLOAD_TOKEN!) })
     expect(r.status).toBe(400)
@@ -214,6 +222,13 @@ describe('share login device flow', () => {
     const typed = d.user_code.replace('-', '').toLowerCase()
     expect((await formPost('/cli', { code: typed, action: 'approve' }, cookie)).status).toBe(200)
     expect((await poll(d)).status).toBe(200)
+  })
+
+  it('answers a JSON null body like an empty object', async () => {
+    expect((await json('/_device/code', null)).status).toBe(200)
+    const r = await json('/_device/token', null)
+    expect(r.status).toBe(400)
+    expect(await r.text()).toBe('device_code missing\n')
   })
 
   it('runs on the combined host with the approve page at /_device', async () => {
