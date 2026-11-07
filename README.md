@@ -18,7 +18,13 @@ User HTML runs only on the content host, never on the origin that holds tokens, 
 curl -fsSL https://app.shares.metabase.fyi/install.sh | sh   # binary to ~/.local/bin/share
 share login                                                  # approve in the browser
 share report.md                                              # prints the link
+share --private notes.md                                     # a link only you can open
+share set <url-or-slug> --org                                # now anyone at Metabase can
 ```
+
+A share is readable by anyone at Metabase (`--org`, the default), by its owner only
+(`--private`), or by anyone with the link (`--public`, only when the server allows it).
+`share set` changes the visibility, title, collection or metadata of a share without a publish.
 
 Binaries are for macOS and Linux (glibc), arm64 and x64. On Windows, use WSL.
 `share -h` lists every command.

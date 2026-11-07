@@ -7,7 +7,7 @@ import { hostname, tmpdir } from 'node:os'
 import { basename, dirname, join } from 'node:path'
 import type {
   DeviceStartResponse, DeviceTokenResponse, PublishRequest, PublishResponse, ServiceTokenCreate, ServiceTokenCreated,
-  ServiceTokenInfo, TokenInfo, VersionInfo, WhoAmI,
+  ServiceTokenInfo, ShareAttrs, ShareInfo, TokenInfo, VersionInfo, Visibility, WhoAmI,
 } from '../src/api-types'
 import { filePathUrl, parseLines, parseViews } from '../src/api-types'
 import { DEFAULT_APP, loadConfig, updateConfig, type Config } from './config'
@@ -34,8 +34,9 @@ export const HELP = `usage: share <file-or-dir> [name]        publish (new slug 
        share login [app-url]             approve a new token in the browser, save it
        share logout                      revoke this machine's token
        share whoami                      the account of the saved token
-       share public <url-or-slug> on|off  open a share without login (if the server allows it)
-       share -p|--public <file-or-dir> ...  publish, then make it public
+       share set <url-or-slug> [--private|--org|--public] [-t <title>] [-c <slug>|--no-collection] [-m k=v]...
+                                         change who can read a share, its title, collection or metadata
+       share public <url-or-slug> on|off  same as \`share set --public\` / \`--org\` (off keeps a private share private)
        share api <path>                  GET /_api/<path> as JSON (collections, shares, versions)
        share token ls [--service]        your CLI tokens (admin, --service: service tokens)
        share token create <name> --scope <scope>... [--on-behalf-of <email>] [--days <n>]
@@ -43,11 +44,17 @@ export const HELP = `usage: share <file-or-dir> [name]        publish (new slug 
        share token revoke <id> [--service]  revoke a token
        share                             list all shares
 
-publish options:
+publish and set options:
+      --private             only you can read it (also hides it from lists of others)
+      --org                 anyone at Metabase with a login can read it (the default)
+  -p, --public              anyone with the link, no login (only if the server allows it)
   -c, --collection <slug>   publish into a collection (made if missing)
-  -t, --title <text>        share title
+      --no-collection       take the share out of its collection
+  -t, --title <text>        share title (set: -t '' clears it)
   -m, --meta <key=value>    share metadata, repeatable
       --message <text>      version message (shown by \`share log\`)
+A new share is --org unless you give --private or --public. A republish (-e)
+without one of them keeps the share's visibility.
 token options:
       --scope <scope>       read:<collection> or write:<collection>, a trailing *
                             matches any rest (write:metareview/*); repeatable
@@ -61,6 +68,8 @@ examples:
   share thing.md                   publish file -> prints URL instantly
   share ./some-dir                 publish whole directory
   share ./dir cool-name            custom name (still gets random suffix)
+  share --private notes.md         only you can open the link
+  share set notes-a3f2b --org      now anyone at Metabase can
   share -x report.md standup       exact memorable URL: /standup/ (guessable!)
   pbpaste | share -f slides.html   stdin; .html/.md becomes the share's index
   share -e ./dir cool-name-a3f2b   overwrite existing share, same URL
@@ -70,7 +79,8 @@ examples:
                                    publish into a collection with metadata
   share api 'shares?collection=metareview/pr-85416&meta.pr=85416'
 
-Viewers need a @metabase.com Google login; URLs are safe to paste anywhere.
+Viewers need a @metabase.com Google login (a --private share: yours); URLs
+are safe to paste anywhere.
 A single .md/.html file publishes as the share's index (remote name
 index.md/index.html) so the slug URL renders it directly. file:// URLs work
 as publish paths. Every publish also lands in ~/.local/share/mb-shares/<slug>/
@@ -79,15 +89,22 @@ Config: ~/.config/shares/config (mode 0600), written by \`share login\`.
 SHARES_URL, SHARES_CONTENT_URL and SHARES_TOKEN in the environment override it.
 `
 
-const COMMANDS = new Set(['login', 'logout', 'whoami', 'rm', 'ls', 'cat', 'download', 'views', 'log', 'public', 'api', 'local', 'help', 'version', 'token'])
+const COMMANDS = new Set(['login', 'logout', 'whoami', 'rm', 'ls', 'cat', 'download', 'views', 'log', 'public', 'set', 'api', 'local', 'help', 'version', 'token'])
+
+const LABEL: Record<Visibility, string> = {
+  private: 'only you',
+  org: 'anyone at Metabase',
+  public: 'anyone with the link, no login',
+}
 
 export interface Opts {
   json: boolean
   edit: boolean
   exact: boolean
-  public: boolean
+  visibility?: Visibility
   filename?: string
   collection?: string
+  noCollection: boolean
   title?: string
   meta: Record<string, string>
   message?: string
@@ -106,12 +123,18 @@ export interface Io {
 }
 
 export function parseArgs(argv: string[]): { opts: Opts; args: string[] } {
-  const opts: Opts = { json: false, edit: false, exact: false, public: false, meta: {}, service: false, scopes: [] }
+  const opts: Opts = { json: false, edit: false, exact: false, noCollection: false, meta: {}, service: false, scopes: [] }
   const args: string[] = []
   const value = (i: number, flag: string) => {
     const v = argv[i + 1]
     if (v === undefined) throw new UsageError(`${flag} needs a value`)
     return v
+  }
+  const vis = (v: Visibility, flag: string) => {
+    if (opts.visibility !== undefined && opts.visibility !== v) {
+      throw new UsageError(`${flag} and --${opts.visibility} together: give one of --private, --org, --public`)
+    }
+    opts.visibility = v
   }
   for (let i = 0; i < argv.length; i++) {
     const a = argv[i]
@@ -120,7 +143,10 @@ export function parseArgs(argv: string[]): { opts: Opts; args: string[] } {
       case '--json': opts.json = true; break
       case '-e': case '--edit': opts.edit = true; break
       case '-x': case '--exact': opts.exact = true; break
-      case '-p': case '--public': opts.public = true; break
+      case '-p': case '--public': vis('public', a); break
+      case '--private': vis('private', a); break
+      case '--org': vis('org', a); break
+      case '--no-collection': opts.noCollection = true; break
       case '-h': case '--help': args.unshift('help'); break
       case '-V': case '--version': args.unshift('version'); break
       case '--local': args.unshift('local'); break
@@ -149,7 +175,21 @@ export function parseArgs(argv: string[]): { opts: Opts; args: string[] } {
         args.push(a)
     }
   }
+  if (opts.noCollection && opts.collection !== undefined) throw new UsageError('-c and --no-collection together: give one')
   return { opts, args }
+}
+
+// the body of POST /_api/shares/<slug> for `share set`
+export function setAttrs(opts: Opts): ShareAttrs {
+  const a: ShareAttrs = {
+    ...(opts.visibility !== undefined && { visibility: opts.visibility }),
+    ...(opts.title !== undefined && { title: opts.title || null }),
+    ...(opts.collection !== undefined && { collection: opts.collection }),
+    ...(opts.noCollection && { collection: null }),
+    ...(Object.keys(opts.meta).length && { meta: opts.meta }),
+  }
+  if (!Object.keys(a).length) throw new UsageError('share set: nothing to change (--private, --org, --public, -t, -c, --no-collection, -m)')
+  return a
 }
 
 const enc = encodeURIComponent
@@ -173,6 +213,14 @@ class Ctx {
 
   async files(slug: string): Promise<string[]> {
     return parseLines(await this.api.text('GET', `/_list?prefix=${enc(slug + '/')}`))
+  }
+
+  // the share's attributes; null when the server has no JSON API (KV store)
+  async shareInfo(slug: string): Promise<ShareInfo | null> {
+    try { return await this.api.json<ShareInfo>('GET', `/_api/shares/${enc(slug)}`) } catch (e) {
+      if (e instanceof HttpError && (e.status === 404 || e.status === 501)) return null
+      throw e
+    }
   }
 
   async exists(slug: string) {
@@ -259,7 +307,11 @@ async function run(ctx: Ctx, cmd: string, a: string[]) {
     }
     case 'log': {
       const slug = deslug(need(a[0], 'share log <url-or-slug>'))
-      const vs = await ctx.api.json<VersionInfo[]>('GET', `/_api/shares/${enc(slug)}/versions`)
+      const [vs, info] = await Promise.all([
+        ctx.api.json<VersionInfo[]>('GET', `/_api/shares/${enc(slug)}/versions`),
+        ctx.api.json<ShareInfo>('GET', `/_api/shares/${enc(slug)}`),
+      ])
+      if (info.visibility) ctx.say(`visibility: ${info.visibility} (${LABEL[info.visibility]})`)
       ctx.say(table(vs.map((v) => [
         `v${v.version}`, v.live ? 'live' : v.state === 'pending' ? 'pending' : '', v.createdBy,
         new Date(v.createdAt).toISOString().replace('T', ' ').slice(0, 16),
@@ -273,7 +325,23 @@ async function run(ctx: Ctx, cmd: string, a: string[]) {
       const v = a[1]
       if (v !== 'on' && v !== 'off') throw new UsageError('usage: share public <url-or-slug> on|off')
       ctx.say((await ctx.api.text('POST', `/_public/${enc(slug)}`, { body: v })).trim())
-      ctx.emit({ slug, public: v === 'on' })
+      const visibility = (await ctx.shareInfo(slug))?.visibility
+      ctx.emit({ slug, public: v === 'on', ...(visibility && { visibility }) })
+      return
+    }
+    case 'set': {
+      const slug = deslug(need(a[0], 'share set <url-or-slug> [--private|--org|--public] [-t <title>] [-c <slug>|--no-collection] [-m k=v]...'))
+      if (!slug || slug.includes('/')) throw new UsageError('usage: share set <url-or-slug> (a whole share, not a file)')
+      const s = await ctx.api.json<ShareInfo>('POST', `/_api/shares/${enc(slug)}`, { json: setAttrs(ctx.opts) })
+      if (ctx.opts.visibility !== undefined && s.visibility !== ctx.opts.visibility) {
+        throw new Error(`the server did not set the visibility (it is ${s.visibility ?? 'unknown'}); is it older than this CLI?`)
+      }
+      ctx.say(table([
+        ['slug', s.slug], ['visibility', `${s.visibility} (${LABEL[s.visibility]})`],
+        ['title', s.title ?? ''], ['collection', s.collection ?? ''],
+        ...Object.entries(s.meta).map(([k, v]) => [`meta.${k}`, typeof v === 'string' ? v : JSON.stringify(v)]),
+      ]))
+      ctx.emit(s)
       return
     }
     case 'rm': {
@@ -394,6 +462,9 @@ async function publish(ctx: Ctx, args: string[]) {
     let name = (multi ? basename(dirname(src)) : args[1] !== undefined ? deslug(args[1]) : defaultName(src)).replace(/ /g, '-')
     const files = collect(srcs)
     if (!files.length) throw new Error(`no files found under ${src} -- nothing uploaded`)
+    if (opts.exact && opts.visibility === 'private') {
+      ctx.note('warning: -x makes a guessable slug. Private keeps other people out, but script in any share you open can read it by name.')
+    }
 
     if (opts.edit) {
       if (!await ctx.exists(name)) throw new Error(`no existing share '${name}' (run \`share\` to list); omit -e to create new`)
@@ -408,18 +479,36 @@ async function publish(ctx: Ctx, args: string[]) {
     mirror(ctx.cfg.mirrorDir, name, files, multi ? dirname(src) : src, opts.edit)
 
     const version = await upload(api, name, files, opts)
-    if (opts.public) {
-      try {
-        await api.text('POST', `/_public/${enc(name)}`, { body: 'on' })
-      } catch (e) {
-        throw new Error(`uploaded, but could not make it public (${(e as Error).message})`)
-      }
-    }
-    if (!opts.json) ctx.note(opts.public ? 'uploaded (public: opens without login)' : 'uploaded')
-    ctx.emit({ url, slug: name, version, files: files.map((f) => f.path), public: opts.public })
+    const visibility = await checkVisibility(ctx, name, version)
+    if (!opts.json) ctx.note(visibility ? `uploaded (${visibility}: ${LABEL[visibility]})` : 'uploaded')
+    ctx.emit({
+      url, slug: name, version, files: files.map((f) => f.path),
+      ...(visibility && { visibility }), public: visibility === 'public',
+    })
   } finally {
     if (tmp) rmSync(tmp, { recursive: true, force: true })
   }
+}
+
+// The visibility after a publish. A server older than visibility ignores
+// the attribute: --public then goes through POST /_public, and --private
+// fails, because the share is readable by everyone at Metabase. Without a
+// flag: org for a new share, unknown (kept) for -e.
+async function checkVisibility(ctx: Ctx, slug: string, version: number | null): Promise<Visibility | undefined> {
+  const want = ctx.opts.visibility
+  if (want === undefined) return ctx.opts.edit ? undefined : 'org'
+  // version null: the legacy publish of a KV store, which has no JSON API
+  const got = version === null ? undefined : (await ctx.shareInfo(slug))?.visibility
+  if (got === want) return got
+  if (want === 'public') {
+    try {
+      await ctx.api.text('POST', `/_public/${enc(slug)}`, { body: 'on' })
+    } catch (e) {
+      throw new Error(`uploaded, but could not make it public (${(e as Error).message})`)
+    }
+    return 'public'
+  }
+  throw new Error(`uploaded, but the server did not make it ${want} (it is ${got ?? 'readable by anyone at Metabase'}); run \`share rm ${slug}\` if it must not stay`)
 }
 
 // Versioned publish (POST /_blobs/missing, PUT /_blobs/<sha>, POST
@@ -444,9 +533,11 @@ async function upload(api: Client, slug: string, files: LocalFile[], opts: Opts)
   const req: PublishRequest = {
     files: blobs.map((b) => ({ path: b.path, sha256: b.sha256 })),
     ...(opts.collection !== undefined && { collection: opts.collection }),
+    ...(opts.noCollection && { collection: null }),
     ...(opts.title !== undefined && { title: opts.title }),
     ...(Object.keys(opts.meta).length && { meta: opts.meta }),
     ...(opts.message !== undefined && { message: opts.message }),
+    ...(opts.visibility !== undefined && { visibility: opts.visibility }),
   }
   for (let attempt = 0; ; attempt++) {
     try {
@@ -464,6 +555,7 @@ async function legacyUpload(api: Client, slug: string, blobs: (LocalFile & { dat
   const q = new URLSearchParams()
   if (opts.collection !== undefined) q.set('collection', opts.collection)
   if (opts.title !== undefined) q.set('title', opts.title)
+  if (opts.visibility !== undefined) q.set('visibility', opts.visibility)
   for (const [k, v] of Object.entries(opts.meta)) q.append('meta', `${k}=${v}`)
   const qs = q.size ? `?${q}` : ''
   await api.text('POST', `/_finalize/${enc(slug)}${qs}`, { body: blobs.map((b) => b.path).join('\n') + '\n' })

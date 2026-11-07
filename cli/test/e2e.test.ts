@@ -21,6 +21,7 @@ const local = (u: string) => u.replace(BASE, LOCAL)
 const SECRET = 'e2e-session-secret'
 const ADMIN_TOKEN = 'e2e-upload-token'
 const USER = 'e2e-user@metabase.com'
+const OTHER = 'e2e-other@metabase.com'
 
 const dir = realpathSync(mkdtempSync(join(tmpdir(), 'share-e2e-')))
 const HOME = join(dir, 'home')
@@ -130,7 +131,7 @@ describe('share CLI against wrangler dev', () => {
 
     const log = JSON.parse((await share(['log', first.url, '--json'])).stdout)
     expect(log.map((v: { version: number; live: boolean }) => [v.version, v.live])).toEqual([[2, true], [1, false]])
-    expect((await share(['log', first.slug])).stdout).toMatch(/^v2\s+live/)
+    expect((await share(['log', first.slug])).stdout).toMatch(/^visibility: org \(anyone at Metabase\)\nv2\s+live/)
 
     expect((await share(['ls', first.slug])).stdout).toBe('index.html\nsub/data.csv\n')
     expect((await share(['cat', `${first.url}index.html`])).stdout).toBe('<h1>v2</h1>')
@@ -172,7 +173,40 @@ describe('share CLI against wrangler dev', () => {
     expect((await share(['ls', p.slug])).code).toBe(1)
   })
 
-  it('creates a service token that publishes only into its collections', async () => {
+  it('publishes a private share that only its owner reads, and opens it with share set --org', async () => {
+    const read = async (u: string, email: string) =>
+      (await fetch(local(u), { headers: { cookie: session(email), accept: 'text/html' } })).text()
+    const missing = await read(`${BASE}/no-such-share-${PORT}/`, OTHER)
+
+    const p = JSON.parse((await share(['--json', '--private', '-t', 'Secret', 'x.md'])).stdout)
+    expect(p).toMatchObject({ visibility: 'private', public: false, version: 1 })
+    expect(await read(p.url, USER)).toContain('hello e2e')
+    expect(await read(p.url, OTHER)).toBe(missing.replaceAll(`no-such-share-${PORT}`, p.slug))
+    expect((await share(['log', p.slug])).stdout).toMatch(/^visibility: private \(only you\)\nv1\s+live/)
+
+    // a republish without a flag keeps it private
+    const e = JSON.parse((await share(['--json', '-e', 'x.md', p.slug])).stdout)
+    expect(e).toMatchObject({ version: 2 })
+    expect(e.visibility).toBeUndefined()
+    expect(await read(p.url, OTHER)).not.toContain('hello e2e')
+
+    const s = await share(['set', p.url, '--org', '-t', '', '-c', 'e2e/set', '-m', 'k=v', '--json'])
+    expect(JSON.parse(s.stdout)).toMatchObject({ slug: p.slug, visibility: 'org', title: null, collection: 'e2e/set', meta: { k: 'v' } })
+    expect(await read(p.url, OTHER)).toContain('hello e2e')
+    expect((await share(['set', p.slug, '--no-collection'])).stdout).toMatch(/^slug\s+\S+\nvisibility\s+org \(anyone at Metabase\)\ntitle\s*\ncollection\s*\nmeta.k\s+v$/m)
+    await share(['rm', p.slug])
+  })
+
+  it('refuses --private with --public, and warns on -x --private', async () => {
+    const both = await share(['--private', '--public', 'x.md'])
+    expect(both.code).toBe(2)
+    expect(both.stderr).toMatch(/together/)
+    const x = await share(['-x', '--private', 'x.md', `exact-private-${PORT}`])
+    expect(x.code).toBe(0)
+    expect(x.stderr).toMatch(/guessable/)
+  })
+
+    it('creates a service token that publishes only into its collections', async () => {
     const admin = { SHARES_TOKEN: ADMIN_TOKEN, SHARES_URL: BASE }
     const t = JSON.parse((await share(['token', 'create', 'e2e-bot', '--scope', 'write:bots/*', '--on-behalf-of', USER, '--json'], { env: admin })).stdout)
     expect(t.token).toMatch(/^shr_/)
