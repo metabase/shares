@@ -2,10 +2,9 @@
 // api-types.ts.
 
 import type { Env } from '../env'
-import { isQueryStore, StoreError } from '../store'
-import { pinned } from '../store'
+import { canRead, isQueryStore, pinned, StoreError } from '../store'
 import type { CommitFile, ShareAttrs, ShareStore } from '../store'
-import type { ImportRequest, PublishResponse } from '../api-types'
+import type { ImportRequest, PublishResponse, Visibility } from '../api-types'
 import { contentBase } from '../origins'
 import { jsonApi } from './json'
 
@@ -25,6 +24,7 @@ function finalizeAttrs(q: URLSearchParams): ShareAttrs | undefined {
   const a: ShareAttrs = {}
   if (q.has('collection')) a.collection = q.get('collection')
   if (q.has('title')) a.title = q.get('title')
+  if (q.has('visibility')) a.visibility = q.get('visibility') as Visibility
   const meta = q.getAll('meta')
   if (meta.length) {
     a.meta = {}
@@ -38,6 +38,24 @@ function finalizeAttrs(q: URLSearchParams): ShareAttrs | undefined {
 }
 
 const lines = (xs: string[]) => new Response(xs.join('\n') + (xs.length ? '\n' : ''))
+
+// null when `who` may write the share `top` (also when nobody owns it);
+// else the refusal. Admin writes the shares of others, but a private share
+// of another owner only when `adminPrivate`. The refusal never shows the
+// owner of a private share.
+async function refuseWrite(store: ShareStore, top: string, who: string, admin: boolean, adminPrivate = false) {
+  const owner = await store.owner(top)
+  if (!owner || owner === who) return null
+  const hidden = (await store.access(top))?.visibility === 'private'
+  if (admin && (!hidden || adminPrivate)) return null
+  return new Response(`owned by ${hidden ? 'another user' : owner}\n`, { status: 403 })
+}
+
+// false when the share that `top` reads exists and `who` may not read it
+const readable = async (store: ShareStore, top: string, who: string) => {
+  const a = await store.access(top)
+  return !a || canRead(a, who)
+}
 
 export async function cli(req: Request, url: URL, env: Env, store: ShareStore, who: string): Promise<Response> {
   try {
@@ -56,9 +74,10 @@ async function dispatch(req: Request, url: URL, env: Env, store: ShareStore, who
     // on anything you can view); bare _list lists your own share slugs
     const prefix = url.searchParams.get('prefix')
     if (prefix?.startsWith('_')) return new Response('reserved\n', { status: 400 })
-    if (prefix) return lines(await store.filesUnder(prefix))
+    // a share you may not read lists as a slug without files
+    if (prefix) return lines(await readable(store, prefix.split('/')[0], who) ? await store.filesUnder(prefix) : [])
     return lines([...await store.shares()]
-      .filter(([, s]) => admin || (s.o || env.ADMIN_EMAIL) === who)
+      .filter(([, s]) => (s.o || env.ADMIN_EMAIL) === who || (admin && s.vis !== 'private'))
       .map(([top]) => top).sort())
   }
 
@@ -90,15 +109,13 @@ async function dispatch(req: Request, url: URL, env: Env, store: ShareStore, who
     if (key.startsWith('_publish/') && req.method === 'POST') {
       const top = key.slice('_publish/'.length).replace(/\/$/, '')
       if (badSlug(top)) return new Response('bad slug\n', { status: 400 })
-      const owner = await store.owner(top)
-      if (owner && owner !== who && !admin) {
-        return new Response(`owned by ${owner}\n`, { status: 403 })
-      }
+      const refused = await refuseWrite(store, top, who, admin)
+      if (refused) return refused
       let body: { files?: CommitFile[]; message?: string } & ShareAttrs
       try { body = await req.json() } catch { return new Response('bad json\n', { status: 400 }) }
       if (!Array.isArray(body.files)) return new Response('files missing\n', { status: 400 })
-      const { title, collection, meta } = body
-      const version = await store.commit(top, body.files, who, body.message, { title, collection, meta })
+      const { title, collection, meta, visibility } = body
+      const version = await store.commit(top, body.files, who, body.message, { title, collection, meta, visibility })
       return Response.json(publishResponse(url, env, top, version))
     }
     return new Response('not found\n', { status: 404 })
@@ -116,24 +133,26 @@ async function dispatch(req: Request, url: URL, env: Env, store: ShareStore, who
     return Response.json(await store.importShare(top, body, who))
   }
 
-  // POST /_public/<slug>, body "on" or "off". Only the owner makes
-  // a share public; the owner or admin makes it private again. "on" is
-  // refused while PUBLIC_SHARING is off. Each change is audit logged.
+  // POST /_public/<slug>, body "on" or "off": the legacy switch of the
+  // visibility public. Only the owner turns it on (visibility public); the
+  // owner or admin turns it off, which makes a public share org and leaves
+  // a private or org share as it is. "on" is refused while PUBLIC_SHARING
+  // is off. Each change is audit logged.
   if (key.startsWith('_public/') && req.method === 'POST') {
     const top = key.slice('_public/'.length).replace(/\/$/, '')
     if (badSlug(top)) return new Response('bad slug\n', { status: 400 })
     const v = (await req.text()).trim()
     if (v !== 'on' && v !== 'off') return new Response('body must be on or off\n', { status: 400 })
-    if (!store.setPublic) return new Response('not supported\n', { status: 501 })
+    if (!isQueryStore(store)) return new Response('not supported\n', { status: 501 })
     if (v === 'on' && env.PUBLIC_SHARING !== '1') {
       return new Response('public sharing is disabled\n', { status: 403 })
     }
-    const owner = await store.owner(top)
-    if (!owner) return new Response('not found\n', { status: 404 })
-    if (owner !== who && !(admin && v === 'off')) {
-      return new Response(`owned by ${owner}\n`, { status: 403 })
-    }
-    await store.setPublic(top, v === 'on', who)
+    const a = await store.access(top)
+    if (!a) return new Response('not found\n', { status: 404 })
+    const refused = await refuseWrite(store, top, who, admin && v === 'off')
+    if (refused) return refused
+    const to = v === 'on' ? 'public' : a.visibility === 'public' ? 'org' : null
+    if (to) await store.setAttrs(top, { visibility: to }, who)
     return new Response(`${v}\n`)
   }
 
@@ -153,10 +172,9 @@ async function dispatch(req: Request, url: URL, env: Env, store: ShareStore, who
   if (key.startsWith('_finalize/')) {
     const top = key.slice('_finalize/'.length).replace(/\/$/, '')
     if (!top || top.startsWith('_') || pinned(top)) return new Response('bad slug\n', { status: 400 })
+    const refused = await refuseWrite(store, top, who, admin)
+    if (refused) return refused
     const owner = await store.owner(top)
-    if (owner && owner !== who && !admin) {
-      return new Response(`owned by ${owner}\n`, { status: 403 })
-    }
     const files = (await req.text()).split('\n').map((s) => s.trim()).filter(Boolean)
     if (!files.length) return new Response('empty manifest\n', { status: 400 })
     const attrs = finalizeAttrs(url.searchParams)
@@ -174,9 +192,11 @@ async function dispatch(req: Request, url: URL, env: Env, store: ShareStore, who
   // unguessable).
   if (key.startsWith('_')) return new Response('reserved\n', { status: 400 })
 
-  // GET /slug/_views: who viewed this share (owner or admin only)
+  // GET /slug/_views: who viewed this share (owner or admin only). A
+  // share you may not read answers as a slug without a share.
   if (req.method === 'GET' && key.endsWith('/_views')) {
     const top = key.slice(0, -'/_views'.length)
+    if (!await readable(store, top, who)) return lines([])
     const owner = await store.owner(top)
     if (owner && owner !== who && !admin) {
       return new Response(`owned by ${owner}\n`, { status: 403 })
@@ -187,21 +207,21 @@ async function dispatch(req: Request, url: URL, env: Env, store: ShareStore, who
   }
 
   if (req.method === 'GET') {
+    if (!await readable(store, key.split('/')[0], who)) return new Response('not found', { status: 404 })
     const body = await store.getStream(key)
     if (body === null) return new Response('not found', { status: 404 })
     return new Response(body)
   }
 
-  // Writes only touch your own shares (admin can touch anything). A slug
+  // Writes only touch your own shares (admin can touch any share but the
+  // private shares of others, which admin can only delete). A slug
   // without an owner is unclaimed; the first PUT claims it. Racers on the
   // same fresh slug are moot: random suffixes.
   const top = key.replace(/\/.*$/, '')
   if (pinned(top)) return new Response('a version is read only\n', { status: 400 })
+  const refused = await refuseWrite(store, top, who, admin, req.method === 'DELETE')
+  if (refused) return refused
   const owner = await store.owner(top)
-
-  if (owner && owner !== who && !admin) {
-    return new Response(`owned by ${owner}\n`, { status: 403 })
-  }
 
   if (req.method === 'PUT') {
     if (!owner) await store.claim(top, who)

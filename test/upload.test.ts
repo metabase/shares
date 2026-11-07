@@ -60,6 +60,13 @@ describe('web upload route', () => {
     expect((await browse(`/${top}/docs/a.txt`, OWNER)).status).toBe(200)
   })
 
+  it('makes a new private share that only its owner can open', async () => {
+    const top = slug('up-priv')
+    expect((await uploadShare(top, { 'a.txt': 'p' }, {}, { visibility: 'private' }, '?new=1')).status).toBe(200)
+    expect((await browse(`/_s/${top}`, OWNER)).status).toBe(200)
+    expect((await browse(`/_s/${top}`, OTHER)).status).toBe(404)
+  })
+
   it('adds a version to an own share and keeps the old one in the history', async () => {
     const top = slug('up-ver')
     expect((await uploadShare(top, { 'a.txt': 'v1' }, {}, {}, '?new=1')).status).toBe(200)

@@ -18,7 +18,13 @@ User HTML runs only on the content host, never on the origin that holds tokens, 
 curl -fsSL https://app.shares.metabase.fyi/install.sh | sh   # binary to ~/.local/bin/share
 share login                                                  # approve in the browser
 share report.md                                              # prints the link
+share --private notes.md                                     # a link only you can open
+share set <url-or-slug> --org                                # now anyone at Metabase can
 ```
+
+A share is readable by anyone at Metabase (`--org`, the default), by its owner only
+(`--private`), or by anyone with the link (`--public`, only when the server allows it).
+`share set` changes the visibility, title, collection or metadata of a share without a publish.
 
 Binaries are for macOS and Linux (glibc), arm64 and x64. On Windows, use WSL.
 `share -h` lists every command.
@@ -64,8 +70,9 @@ bun run test                      # tsc (worker, cli) + worker tests + CLI unit 
 
 Local data for UI work, with `bun run dev` running:
 
-1. `bun run dev:seed`: 34 shares of 4 owners (every renderer, versions, collections). Run it
-   again: unchanged shares are skipped.
+1. `bun run dev:seed`: 36 shares of 4 owners and 5 collections (every renderer, versions,
+   collections, 5 private shares, one private collection). Run it again: unchanged shares are
+   skipped.
 2. Open http://localhost:8787/_dev/login: you sign in as `ADMIN_EMAIL` (set it in `.dev.vars`
    for the admin view). `/_dev/login?email=sam.chen@metabase.com` signs in as another user,
    for the non-admin view. The session cookie is shared by every port on `localhost`: for a

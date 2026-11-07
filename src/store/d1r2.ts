@@ -9,11 +9,11 @@
 // one D1 batch (a transaction) marks it complete and moves current_version.
 
 import type { Env } from '../env'
-import { baseSlug, pinned, StoreError } from './types'
+import { VISIBILITIES, baseSlug, pinned, StoreError } from './types'
 import type { ImportRequest, ImportResponse } from '../api-types'
 import type {
-  AuditEntry, Collection, CollectionUpdate, CommitFile, Manifest, QueryStore, ShareAttrs, ShareFilter, ShareInfo,
-  ShareManifest, ShareStore, ShareSummary, VersionInfo, ViewLog,
+  Access, AuditEntry, Collection, CollectionUpdate, CommitFile, Manifest, QueryStore, ShareAttrs, ShareFilter, ShareInfo,
+  ShareManifest, ShareStore, ShareSummary, VersionInfo, ViewLog, Visibility,
 } from './types'
 
 const SHA = /^[0-9a-f]{64}$/
@@ -71,8 +71,12 @@ function metaRows(meta: unknown, allowNull: boolean): [string, string | null][] 
   })
 }
 
-function checkAttrs(a: ShareAttrs) {
+function checkAttrs(a: ShareAttrs, env: Env) {
   if (!isObject(a)) throw new StoreError(400, 'bad attributes')
+  if (a.visibility !== undefined && !VISIBILITIES.includes(a.visibility as Visibility)) {
+    throw new StoreError(400, `bad visibility: one of ${VISIBILITIES.join(', ')}`)
+  }
+  if (a.visibility === 'public' && env.PUBLIC_SHARING !== '1') throw new StoreError(403, 'public sharing is disabled')
   if (a.collection !== undefined && a.collection !== null && !validCollection(a.collection)) {
     throw new StoreError(400, `bad collection: ${a.collection}`)
   }
@@ -83,18 +87,18 @@ function checkAttrs(a: ShareAttrs) {
 const parseMeta = (s: string | null) => (s ? JSON.parse(s) : {}) as Record<string, never>
 
 interface ShareRow {
-  slug: string; title: string | null; owner: string; collection: string | null; meta: string
+  slug: string; title: string | null; owner: string; collection: string | null; meta: string; visibility: Visibility
   current_version: number; file_count: number; total_bytes: number; created_at: number; updated_at: number
 }
 
-const SHARE_SELECT = `SELECT s.slug, s.title, s.owner, s.collection, s.current_version, s.created_at, s.updated_at,
+const SHARE_SELECT = `SELECT s.slug, s.title, s.owner, s.collection, s.visibility, s.current_version, s.created_at, s.updated_at,
   v.file_count, v.total_bytes,
   (SELECT json_group_object(key, json(value)) FROM share_meta WHERE share = s.slug) AS meta
   FROM shares s JOIN versions v ON v.share = s.slug AND v.version = s.current_version`
 
 const shareInfo = (r: ShareRow): ShareInfo => ({
   slug: r.slug, title: r.title, owner: r.owner, collection: r.collection, meta: parseMeta(r.meta),
-  version: r.current_version, fileCount: r.file_count, totalBytes: r.total_bytes,
+  visibility: r.visibility, version: r.current_version, fileCount: r.file_count, totalBytes: r.total_bytes,
   createdAt: r.created_at, updatedAt: r.updated_at,
 })
 
@@ -102,9 +106,21 @@ interface CollectionRow {
   slug: string; title: string | null; owner: string; meta: string; shares: number; created_at: number; updated_at: number
 }
 
+// SQL condition: the share s is readable by the viewer bound at parameter
+// `p` (null: anonymous). The JS form is canRead() in types.ts.
+const readableBy = (p: string) => `(s.visibility != 'private' OR s.owner = ${p})`
+
+// SQL condition: the collection c is readable by the viewer bound at
+// parameter `p`. A collection without a live org or public share is
+// private: only its owner and the owners of shares in it can read it.
+const collectionReadableBy = (p: string) => `(c.owner = ${p} OR EXISTS (SELECT 1 FROM shares s
+  WHERE s.collection = c.slug AND (s.owner = ${p} OR (s.current_version IS NOT NULL AND s.visibility != 'private'))))`
+
+// ?1: the viewer, for the share count and the read check
 const COLLECTION_SELECT = `SELECT c.slug, c.title, c.owner, c.meta, c.created_at, c.updated_at,
-  (SELECT count(*) FROM shares s WHERE s.collection = c.slug AND s.current_version IS NOT NULL) AS shares
-  FROM collections c`
+  (SELECT count(*) FROM shares s WHERE s.collection = c.slug AND s.current_version IS NOT NULL
+    AND ${readableBy('?1')}) AS shares
+  FROM collections c WHERE ${collectionReadableBy('?1')}`
 
 // FTS5 query of the search box: each word is a prefix term, all must match
 export function searchQuery(q: string) {
@@ -227,6 +243,13 @@ export class D1R2Store implements ShareStore, QueryStore {
         : this.db.prepare(`INSERT INTO share_meta (share, key, value) VALUES (?, ?, ?)
           ON CONFLICT (share, key) DO UPDATE SET value = excluded.value`).bind(slug, k, v))
     }
+    if (a?.visibility !== undefined) {
+      // audit only a change; the row goes before the update
+      out.push(this.db.prepare(`INSERT INTO audit (at, actor, action, share)
+        SELECT ?1, ?2, ?3, ?4 WHERE EXISTS (SELECT 1 FROM shares WHERE slug = ?4 AND visibility != ?5)`)
+        .bind(now, by, `visibility.${a.visibility}`, slug, a.visibility),
+      this.db.prepare('UPDATE shares SET visibility = ? WHERE slug = ?').bind(a.visibility, slug))
+    }
     out.push(this.db.prepare(`UPDATE collections SET updated_at = ?
       WHERE slug = (SELECT collection FROM shares WHERE slug = ?)`).bind(now, slug))
     return out
@@ -268,7 +291,7 @@ export class D1R2Store implements ShareStore, QueryStore {
   // Commit the uploader's pending version as the share's files. Paths not
   // uploaded fail the commit; the live version stays as it is.
   async finalize(slug: string, files: string[], owner: string, by: string, attrs?: ShareAttrs) {
-    if (attrs) checkAttrs(attrs)
+    if (attrs) checkAttrs(attrs, this.env)
     const pv = await this.db.prepare(`SELECT version FROM versions
       WHERE share = ? AND state = 'pending' AND created_by = ? ORDER BY version DESC LIMIT 1`)
       .bind(slug, by).first<{ version: number }>()
@@ -331,7 +354,7 @@ export class D1R2Store implements ShareStore, QueryStore {
 
   // One version from a manifest of uploaded blobs, in one D1 batch.
   async commit(slug: string, files: CommitFile[], by: string, message?: string, attrs?: ShareAttrs, owner = by) {
-    if (attrs) checkAttrs(attrs)
+    if (attrs) checkAttrs(attrs, this.env)
     const rows = await this.blobRows(files)
     const total = rows.reduce((n, r) => n + r.size, 0)
     const now = Date.now()
@@ -437,12 +460,12 @@ export class D1R2Store implements ShareStore, QueryStore {
   }
 
   async shares() {
-    const { results } = await this.db.prepare(`SELECT s.slug, s.owner, s.title, s.updated_at, s.public, v.file_count FROM shares s
+    const { results } = await this.db.prepare(`SELECT s.slug, s.owner, s.title, s.collection, s.updated_at, s.visibility, v.file_count FROM shares s
       JOIN versions v ON v.share = s.slug AND v.version = s.current_version`)
-      .all<{ slug: string; owner: string; title: string | null; updated_at: number; public: number; file_count: number }>()
+      .all<{ slug: string; owner: string; title: string | null; collection: string | null; updated_at: number; visibility: Visibility; file_count: number }>()
     return new Map<string, ShareSummary>(results.map((r) =>
-      [r.slug, { n: r.file_count, t: r.updated_at, o: r.owner, ...(r.title ? { title: r.title } : {}),
-        ...(r.public ? { pub: true } : {}) }]))
+      [r.slug, { n: r.file_count, t: r.updated_at, o: r.owner, vis: r.visibility,
+        ...(r.title ? { title: r.title } : {}), ...(r.collection ? { c: r.collection } : {}) }]))
   }
 
   // Removes the share and (cascade) its versions, files, views and metadata,
@@ -486,22 +509,11 @@ export class D1R2Store implements ShareStore, QueryStore {
       WHERE excluded.last_at - views.last_at >= 1800000`).bind(slug, email, Date.now()).run()
   }
 
-  // only a published share (current_version set) is public to readers
-  async isPublic(slug: string) {
-    const r = await this.db.prepare(
-      'SELECT 1 AS ok FROM shares WHERE slug = ? AND public = 1 AND current_version IS NOT NULL',
-    ).bind(baseSlug(slug)).first<{ ok: number }>()
-    return !!r
-  }
-
-  async setPublic(slug: string, on: boolean, by: string) {
-    const [upd] = await this.db.batch([
-      this.db.prepare('UPDATE shares SET public = ? WHERE slug = ?').bind(on ? 1 : 0, slug),
-      this.db.prepare(`INSERT INTO audit (at, actor, action, share)
-        SELECT ?1, ?2, ?3, ?4 WHERE EXISTS (SELECT 1 FROM shares WHERE slug = ?4)`)
-        .bind(Date.now(), by, on ? 'public.on' : 'public.off', slug),
-    ])
-    if (!upd.meta.changes) throw new StoreError(404, 'not found')
+  // one indexed read; also for shares without a live version, so that a
+  // write refusal can hide the owner of a private share
+  async access(top: string) {
+    return await this.db.prepare('SELECT owner, visibility FROM shares WHERE slug = ?')
+      .bind(baseSlug(top)).first<Access>()
   }
 
   async audit(limit: number) {
@@ -520,20 +532,34 @@ export class D1R2Store implements ShareStore, QueryStore {
   // versions are the count
   async countPush() {}
 
-  async collections(prefix = '') {
+  async collections(prefix: string, viewer: string | null) {
     const { results } = await this.db.prepare(`${COLLECTION_SELECT}
-      WHERE substr(c.slug, 1, ?1) = ?2 ORDER BY c.updated_at DESC, c.slug`)
-      .bind(prefix.length, prefix).all<CollectionRow>()
+      AND substr(c.slug, 1, ?2) = ?3 ORDER BY c.updated_at DESC, c.slug`)
+      .bind(viewer, prefix.length, prefix).all<CollectionRow>()
     return results.map(collectionInfo)
   }
 
-  async collection(slug: string) {
-    const r = await this.db.prepare(`${COLLECTION_SELECT} WHERE c.slug = ?`).bind(slug).first<CollectionRow>()
+  async collection(slug: string, viewer: string | null) {
+    const r = await this.db.prepare(`${COLLECTION_SELECT} AND c.slug = ?2`).bind(viewer, slug).first<CollectionRow>()
     return r ? collectionInfo(r) : null
+  }
+
+  async collectionsFor(viewer: string) {
+    const { results } = await this.db.prepare(`${COLLECTION_SELECT}
+      AND (c.owner = ?1 OR EXISTS (SELECT 1 FROM shares s WHERE s.collection = c.slug
+        AND s.owner = ?1 AND s.current_version IS NOT NULL))
+      ORDER BY c.updated_at DESC, c.slug`).bind(viewer).all<CollectionRow>()
+    return results.map(collectionInfo)
+  }
+
+  async collectionOwner(slug: string) {
+    const r = await this.db.prepare('SELECT owner FROM collections WHERE slug = ?').bind(slug).first<{ owner: string }>()
+    return r?.owner ?? null
   }
 
   // Makes the collection (owner = by) or updates it; the caller checks the
   // owner of an existing one.
+  // returns the collection as `by` sees it
   async putCollection(slug: string, u: CollectionUpdate, by: string) {
     if (!validCollection(slug)) throw new StoreError(400, `bad collection: ${slug}`)
     if (!isObject(u)) throw new StoreError(400, 'bad collection update')
@@ -550,11 +576,11 @@ export class D1R2Store implements ShareStore, QueryStore {
         meta = coalesce(?5, meta) WHERE slug = ?1`)
         .bind(slug, now, u.title !== undefined ? 1 : 0, u.title ?? null, meta ?? null),
     ])
-    return (await this.collection(slug))!
+    return (await this.collection(slug, by))!
   }
 
   async setAttrs(slug: string, attrs: ShareAttrs, by: string) {
-    checkAttrs(attrs)
+    checkAttrs(attrs, this.env)
     const now = Date.now()
     await this.db.batch([
       ...this.attrStatements(slug, by, attrs, now),
@@ -564,8 +590,8 @@ export class D1R2Store implements ShareStore, QueryStore {
   }
 
   async queryShares(f: ShareFilter) {
-    const where: string[] = []
-    const args: unknown[] = []
+    const where: string[] = [readableBy('?')]
+    const args: unknown[] = [f.viewer]
     if (f.collection !== undefined) { where.push('s.collection = ?'); args.push(f.collection) }
     if (f.owner !== undefined) { where.push('s.owner = ?'); args.push(f.owner) }
     if (f.before !== undefined) { where.push('s.updated_at < ?'); args.push(f.before) }
@@ -577,7 +603,7 @@ export class D1R2Store implements ShareStore, QueryStore {
       args.push(k, JSON.stringify(v), json)
     }
     const { results } = await this.db.prepare(`${SHARE_SELECT}
-      ${where.length ? `WHERE ${where.join(' AND ')}` : ''} ORDER BY s.updated_at DESC, s.slug LIMIT ?`)
+      WHERE ${where.join(' AND ')} ORDER BY s.updated_at DESC, s.slug LIMIT ?`)
       .bind(...args, f.limit).all<ShareRow>()
     return results.map(shareInfo)
   }
@@ -617,13 +643,14 @@ export class D1R2Store implements ShareStore, QueryStore {
     } satisfies ShareManifest
   }
 
-  async search(q: string, owner: string | undefined, limit: number) {
+  async search(q: string, owner: string | undefined, viewer: string | null, limit: number) {
     const match = searchQuery(q)
     if (!match) return []
     const { results } = await this.db.prepare(`${SHARE_SELECT}
       JOIN share_search ON share_search.slug = s.slug
-      WHERE share_search MATCH ?1 AND (?2 IS NULL OR s.owner = ?2) ORDER BY share_search.rank LIMIT ?3`)
-      .bind(match, owner ?? null, limit).all<ShareRow>()
+      WHERE share_search MATCH ?1 AND (?2 IS NULL OR s.owner = ?2) AND ${readableBy('?4')}
+      ORDER BY share_search.rank LIMIT ?3`)
+      .bind(match, owner ?? null, limit, viewer).all<ShareRow>()
     return results.map(shareInfo)
   }
 
@@ -643,8 +670,8 @@ export class D1R2Store implements ShareStore, QueryStore {
     try {
       await this.db.batch([
         this.db.prepare('PRAGMA defer_foreign_keys = true'),
-        this.db.prepare(`INSERT INTO shares (slug, owner, title, collection, current_version, public, created_at, updated_at)
-          SELECT ?2, owner, title, collection, current_version, public, created_at, ?3 FROM shares WHERE slug = ?1`)
+        this.db.prepare(`INSERT INTO shares (slug, owner, title, collection, current_version, public, visibility, created_at, updated_at)
+          SELECT ?2, owner, title, collection, current_version, public, visibility, created_at, ?3 FROM shares WHERE slug = ?1`)
           .bind(slug, to, Date.now()),
         move('versions', 'share'), move('files', 'share'), move('share_meta', 'share'), move('views', 'share'),
         this.db.prepare('DELETE FROM shares WHERE slug = ?').bind(slug),

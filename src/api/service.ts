@@ -6,8 +6,8 @@
 
 import type { Env } from '../env'
 import type { WhoAmI } from '../api-types'
-import { baseSlug, isQueryStore, pinned, StoreError } from '../store'
-import type { CommitFile, QueryStore, ShareAttrs, ShareStore } from '../store'
+import { baseSlug, canRead, isQueryStore, pinned, StoreError } from '../store'
+import type { CommitFile, QueryStore, ShareAttrs, ShareInfo, ShareStore } from '../store'
 import type { ServiceCaller } from '../tokens'
 import { revokeServiceToken } from '../tokens'
 import { badSlug, publishResponse } from './cli'
@@ -30,6 +30,11 @@ const error = (status: number, message: string) => Response.json({ error: messag
 const lines = (xs: string[]) => new Response(xs.join('\n') + (xs.length ? '\n' : ''))
 const outOfScope = () => error(403, 'out of token scope')
 
+// A service token makes private or org shares, never public ones
+function checkVisibility(a: ShareAttrs) {
+  if (a?.visibility === 'public') throw new StoreError(403, 'a service token cannot make a share public')
+}
+
 async function body<T>(req: Request) {
   try { return await req.json() as T } catch { throw new StoreError(400, 'bad json') }
 }
@@ -48,9 +53,17 @@ export async function serviceApi(req: Request, url: URL, env: Env, store: ShareS
 async function dispatch(req: Request, url: URL, env: Env, store: ShareStore & QueryStore,
   who: ServiceCaller): Promise<Response> {
   const can = (access: Access, collection: string | null | undefined) => allows(who.scopes, access, collection)
-  // a share is in scope when it exists and its collection matches; a
-  // version read path is in scope when its share is
-  const shareIn = async (access: Access, top: string) => can(access, (await store.share(baseSlug(top)))?.collection)
+  // The token reads as who.email: its own private shares (those it made
+  // for itself), never the private shares of a person.
+  const viewer = who.email
+  // the share, or null when it does not exist or the token may not read it
+  const readable = async (slug: string): Promise<ShareInfo | null> => {
+    const s = await store.share(slug)
+    return s && canRead(s, viewer) ? s : null
+  }
+  // a share is in scope when the token can read it and its collection
+  // matches; a version read path is in scope when its share is
+  const shareIn = async (access: Access, top: string) => can(access, (await readable(baseSlug(top)))?.collection)
   const key = decodeURIComponent(url.pathname.slice(1))
   const get = req.method === 'GET'
 
@@ -80,26 +93,32 @@ async function dispatch(req: Request, url: URL, env: Env, store: ShareStore & Qu
     if (badSlug(top)) return error(400, 'bad slug')
     const b = await body<{ files?: CommitFile[]; message?: string } & ShareAttrs>(req)
     if (!Array.isArray(b.files)) return error(400, 'files missing')
+    checkVisibility(b)
+    // a share without a live version can still have an owner
+    const a = await store.access(top)
+    if (a && !canRead(a, viewer)) return error(404, 'not found')
     const share = await store.share(top)
     const collection = b.collection === undefined ? share?.collection : b.collection
     if (!can('write', collection) || (share && !can('write', share.collection))) return outOfScope()
-    const { title, meta } = b
-    const version = await store.commit!(top, b.files, who.agent, b.message, { title, collection, meta }, who.email)
+    const { title, meta, visibility } = b
+    const version = await store.commit!(top, b.files, who.agent, b.message, { title, collection, meta, visibility }, who.email)
     return Response.json(publishResponse(url, env, top, version))
   }
 
   if (key === '_api/collections' && get) {
-    return Response.json((await store.collections(url.searchParams.get('prefix') ?? '')).filter((c) => can('read', c.slug)))
+    return Response.json((await store.collections(url.searchParams.get('prefix') ?? '', viewer)).filter((c) => can('read', c.slug)))
   }
   if (key.startsWith('_api/collections/')) {
     const slug = key.slice('_api/collections/'.length)
     if (get) {
       if (!can('read', slug)) return outOfScope()
-      const c = await store.collection(slug)
+      const c = await store.collection(slug, viewer)
       return c ? Response.json(c) : error(404, 'not found')
     }
     if (req.method !== 'PUT') return error(405, 'method not allowed')
     if (!can('write', slug)) return outOfScope()
+    // a private collection that this token cannot read: refused without its owner
+    if (!await store.collection(slug, viewer) && await store.collectionOwner(slug)) return error(403, 'not your collection')
     return Response.json(await store.putCollection(slug, await body(req), who.email))
   }
 
@@ -114,18 +133,21 @@ async function dispatch(req: Request, url: URL, env: Env, store: ShareStore & Qu
     const meta: Record<string, string> = {}
     for (const [k, v] of q) if (k.startsWith('meta.')) meta[k.slice('meta.'.length)] = v
     return Response.json(await store.queryShares({
-      collection: collection!, owner: q.get('owner') ?? undefined, meta, limit, before,
+      collection: collection!, owner: q.get('owner') ?? undefined, meta, viewer, limit, before,
     }))
   }
   if (key.startsWith('_api/shares/')) {
     const [slug, sub, ...extra] = key.slice('_api/shares/'.length).split('/')
     if (extra.length || !slug || slug.startsWith('_')) return error(404, 'not found')
-    const share = await store.share(slug)
+    const share = await readable(slug)
     if (!share || !can('read', share.collection)) return outOfScope()
     if (sub === undefined && req.method === 'POST') {
       const attrs = await body<ShareAttrs>(req)
       if (!can('write', share.collection)
         || (attrs.collection !== undefined && !can('write', attrs.collection))) return outOfScope()
+      checkVisibility(attrs)
+      // only the owner changes who can read a share
+      if (attrs.visibility !== undefined && share.owner !== viewer) return error(403, 'only the owner sets the visibility')
       await store.setAttrs(slug, attrs, who.agent)
       return Response.json(await store.share(slug))
     }

@@ -4,7 +4,7 @@ import { join } from 'node:path'
 import { describe, expect, it } from 'vitest'
 import { loadConfig, parseConfig, updateConfig } from '../config'
 import { collect, defaultName, deslug, localCopy, mirror } from '../files'
-import { loginBase, parseArgs } from '../main'
+import { HELP, loginBase, parseArgs, setAttrs } from '../main'
 
 const tmp = () => mkdtempSync(join(tmpdir(), 'share-unit-'))
 
@@ -31,10 +31,47 @@ describe('parseArgs', () => {
     expect(() => parseArgs(['-f'])).toThrow(/needs a value/)
   })
 
-  it('collects repeated scopes for token create', () => {
+  it('maps --private, --org and -p/--public to a visibility', () => {
+    expect(parseArgs(['--private', 'x.md']).opts.visibility).toBe('private')
+    expect(parseArgs(['--org', 'x.md']).opts.visibility).toBe('org')
+    expect(parseArgs(['-p', 'x.md']).opts.visibility).toBe('public')
+    expect(parseArgs(['--public', '--public', 'x.md']).opts.visibility).toBe('public')
+    expect(parseArgs(['x.md']).opts.visibility).toBeUndefined()
+  })
+
+  it('refuses two different visibilities, and -c with --no-collection', () => {
+    expect(() => parseArgs(['--private', '--public', 'x.md'])).toThrow(/--public and --private together/)
+    expect(() => parseArgs(['-p', '--private', 'x.md'])).toThrow(/--private and --public together/)
+    expect(() => parseArgs(['--org', '--private'])).toThrow(/together/)
+    expect(() => parseArgs(['set', 's', '-c', 'a', '--no-collection'])).toThrow(/--no-collection together/)
+  })
+
+    it('collects repeated scopes for token create', () => {
     const { opts } = parseArgs(['token', 'create', 'bot', '--scope', 'write:a/*', '--scope', 'read:b', '--days', '30'])
     expect(opts.scopes).toEqual(['write:a/*', 'read:b'])
     expect(opts.days).toBe(30)
+  })
+})
+
+describe('share set', () => {
+  it('sends only the given attributes', () => {
+    const { opts, args } = parseArgs(['set', 'https://h/s-a3f2b/', '--org', '-t', 'T', '-c', 'a/b', '-m', 'pr=1'])
+    expect(args).toEqual(['set', 'https://h/s-a3f2b/'])
+    expect(setAttrs(opts)).toEqual({ visibility: 'org', title: 'T', collection: 'a/b', meta: { pr: '1' } })
+    expect(setAttrs(parseArgs(['set', 's', '--private']).opts)).toEqual({ visibility: 'private' })
+  })
+
+  it('clears the title with -t "" and the collection with --no-collection', () => {
+    expect(setAttrs(parseArgs(['set', 's', '-t', '', '--no-collection']).opts)).toEqual({ title: null, collection: null })
+  })
+
+  it('refuses a set with nothing to change', () => {
+    expect(() => setAttrs(parseArgs(['set', 's']).opts)).toThrow(/nothing to change/)
+  })
+
+  it('is in the help text, with --private', () => {
+    expect(HELP).toMatch(/share set <url-or-slug> \[--private\|--org\|--public\]/)
+    expect(HELP).toMatch(/--private\s+only you can read it/)
   })
 })
 

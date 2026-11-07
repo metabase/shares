@@ -45,3 +45,5 @@ the content host. A 409 is a concurrent publish to the same share: publish again
 - Pull requests with runs: `GET /_api/shares?collection=metareview/<owner>-<repo>/pr-<n>`, or
   `GET /_api/collections?prefix=metareview/`. Filter on meta: `&meta.verdict=blocking`.
 - A browser needs a @metabase.com login. A bearer GET of `<slug>@<n>/<path>` gives the raw bytes.
+- Private shares of other owners are never listed or readable, also not by admin; they answer as a
+  slug that does not exist. The token reads as its owner email. Runs are org shares by default.

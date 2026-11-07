@@ -15,8 +15,9 @@ export interface ShareSummary {
   n: number // file count
   t: number // newest timestamp, 0 when unknown
   o?: string // owner email; undefined on legacy shares (= ADMIN_EMAIL)
-  pub?: boolean // owner marked it public; D1+R2 only
+  vis?: Visibility // D1+R2 only; undefined = 'org'
   title?: string // D1+R2 only
+  c?: string // collection; D1+R2 only
 }
 
 // one audit log row, newest first from audit()
@@ -27,9 +28,24 @@ export interface AuditEntry {
   share: string | null
 }
 
-import type { Collection, CollectionUpdate, ImportRequest, ImportResponse, ShareAttrs, ShareInfo, ShareManifest, VersionInfo } from '../api-types'
+import type {
+  Collection, CollectionUpdate, ImportRequest, ImportResponse, ShareAttrs, ShareInfo, ShareManifest, VersionInfo, Visibility,
+} from '../api-types'
 
-export type { Collection, CollectionUpdate, ShareAttrs, ShareInfo, ShareManifest, VersionInfo }
+export type { Collection, CollectionUpdate, ShareAttrs, ShareInfo, ShareManifest, VersionInfo, Visibility }
+
+export const VISIBILITIES: readonly Visibility[] = ['private', 'org', 'public']
+
+// who owns a share and who can read it
+export interface Access {
+  owner: string
+  visibility: Visibility
+}
+
+// The read rule of every read path: a private share is for its owner only.
+// viewer: the signed-in email, or null for an anonymous reader. Public
+// shares need the PUBLIC_SHARING check of the caller as well.
+export const canRead = (a: Access, viewer: string | null) => a.visibility !== 'private' || a.owner === viewer
 
 // one file of a versioned publish (POST /_publish/<slug>)
 export interface CommitFile {
@@ -88,10 +104,10 @@ export interface ShareStore {
   // returns the new version number. owner: of a new share, default by
   commit?(slug: string, files: CommitFile[], by: string, message?: string, attrs?: ShareAttrs, owner?: string): Promise<number>
 
-  // Public shares, D1+R2 only. isPublic is false on the KV adapter.
-  isPublic(slug: string): Promise<boolean>
-  // set the public bit and add an audit row, in one batch
-  setPublic?(slug: string, on: boolean, by: string): Promise<void>
+  // owner and visibility of the share that a top segment ("<slug>" or
+  // "<slug>@<n>") reads; null when the share does not exist. The KV
+  // adapter has no visibility: always null, every share reads as org.
+  access(top: string): Promise<Access | null>
   audit?(limit: number): Promise<AuditEntry[]>
 
   // One share from the mb-shares KV export, D1+R2 only. by: the
@@ -104,14 +120,27 @@ export interface ShareFilter {
   collection?: string
   owner?: string
   meta?: Record<string, string> // key -> JSON value or its string form
+  // the reader: private shares of other owners are left out. null: an
+  // anonymous reader, who gets no private share.
+  viewer: string | null
   limit: number
   before?: number
 }
 
 // Collections, share attributes and JSON reads. D1+R2 only.
 export interface QueryStore {
-  collections(prefix?: string): Promise<Collection[]>
-  collection(slug: string): Promise<Collection | null>
+  // Collection.shares counts the shares that viewer can read. A
+  // collection without a live org or public share is private: it is
+  // left out (null) for every viewer but its owner and the owners of
+  // shares in it.
+  collections(prefix: string, viewer: string | null): Promise<Collection[]>
+  collection(slug: string, viewer: string | null): Promise<Collection | null>
+  // the collections of the viewer's own list: the ones the viewer owns
+  // and the ones that hold a live share of the viewer, newest first
+  collectionsFor(viewer: string): Promise<Collection[]>
+  // owner of the collection, without the read check; for write checks
+  // only, never shown to the writer
+  collectionOwner(slug: string): Promise<string | null>
   putCollection(slug: string, update: CollectionUpdate, by: string): Promise<Collection>
   // attributes of a share without a publish
   setAttrs(slug: string, attrs: ShareAttrs, by: string): Promise<void>
@@ -124,12 +153,13 @@ export interface QueryStore {
 
   // Web app. Full text search over slug, title, collection, owner,
   // file paths and metadata; every word is a prefix. Best match first.
-  search(q: string, owner: string | undefined, limit: number): Promise<ShareInfo[]>
+  // Private shares of others than viewer are left out.
+  search(q: string, owner: string | undefined, viewer: string | null, limit: number): Promise<ShareInfo[]>
   // bytes of a blob from a manifest, any version
   blobBytes(sha: string): Promise<ArrayBuffer | null>
   // new slug for the share with all its versions; audit logged
   rename(slug: string, to: string, by: string): Promise<void>
-  // new owner; audit logged. The caller checks the email.
+  // new owner; audit logged; the visibility stays. The caller checks the email.
   transfer(slug: string, to: string, by: string): Promise<void>
 }
 

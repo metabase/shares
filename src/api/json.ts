@@ -2,8 +2,8 @@
 // attributes, versions and manifests. Shapes: api-types.ts.
 
 import type { Env } from '../env'
-import { isQueryStore, StoreError } from '../store'
-import type { ShareStore } from '../store'
+import { canRead, isQueryStore, StoreError } from '../store'
+import type { ShareAttrs, ShareStore } from '../store'
 
 const error = (status: number, message: string) => Response.json({ error: message }, { status })
 
@@ -20,10 +20,12 @@ export async function jsonApi(req: Request, url: URL, key: string, env: Env, sto
   try {
     if (kind === 'collections') {
       const slug = rest.join('/')
-      if (!slug) return get ? Response.json(await store.collections(url.searchParams.get('prefix') ?? '')) : error(405, 'method not allowed')
-      const c = await store.collection(slug)
+      if (!slug) return get ? Response.json(await store.collections(url.searchParams.get('prefix') ?? '', who)) : error(405, 'method not allowed')
+      const c = await store.collection(slug, who)
       if (get) return c ? Response.json(c) : error(404, 'not found')
       if (req.method !== 'PUT') return error(405, 'method not allowed')
+      // a private collection of another owner: refused without its owner
+      if (!c && await store.collectionOwner(slug)) return error(403, 'not your collection')
       if (c && c.owner !== who && !admin) return error(403, `owned by ${c.owner}`)
       return Response.json(await store.putCollection(slug, await body(req), who))
     }
@@ -45,17 +47,25 @@ export async function jsonApi(req: Request, url: URL, key: string, env: Env, sto
       if (before !== undefined && !Number.isFinite(before)) return error(400, 'bad before')
       const meta: Record<string, string> = {}
       for (const [k, v] of q) if (k.startsWith('meta.')) meta[k.slice('meta.'.length)] = v
-      return Response.json(await store.queryShares({ collection, owner, meta, limit, before }))
+      return Response.json(await store.queryShares({ collection, owner, meta, viewer: who, limit, before }))
     }
 
     if (kind === 'shares') {
       const [slug, sub, ...extra] = rest
       if (extra.length || slug.startsWith('_')) return error(404, 'not found')
+      // admin has no read exemption: a private share of another owner is
+      // a slug without a share
       const share = await store.share(slug)
-      if (!share) return error(404, 'not found')
+      if (!share || !canRead(share, who)) return error(404, 'not found')
       if (sub === undefined && req.method === 'POST') {
         if (share.owner !== who && !admin) return error(403, `owned by ${share.owner}`)
-        await store.setAttrs(slug, await body(req), who)
+        const attrs = await body<ShareAttrs>(req)
+        // admin changes the visibility of another owner's share only from
+        // public to org
+        if (share.owner !== who && attrs?.visibility !== undefined && attrs.visibility !== 'org') {
+          return error(403, 'only the owner sets this visibility')
+        }
+        await store.setAttrs(slug, attrs, who)
         return Response.json(await store.share(slug))
       }
       if (!get) return error(405, 'method not allowed')

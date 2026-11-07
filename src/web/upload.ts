@@ -105,7 +105,8 @@ export function uploadUi(o: UploadOpts) {
   const head = o.mode === 'new'
     ? `<h2>New share${o.collection ? ` in <code>${esc(o.collection)}</code>` : ''}</h2>
 <div class="two"><label>Slug<input name="slug" required autocomplete="off" spellcheck="false"></label>
-<label>Title <span class="opt">optional</span><input name="title" autocomplete="off"></label></div>`
+<label>Title <span class="opt">optional</span><input name="title" autocomplete="off"></label></div>
+<label class="upchk"><input type="checkbox" name="private">Private: only you can open it</label>`
     : `<h2>New version of <code>${esc(o.slug ?? '')}</code></h2>
 <p class="hint">The files replace the live version. The old version stays in the history.</p>
 <label>Message <span class="opt">optional</span><input name="message" autocomplete="off"></label>`
@@ -166,6 +167,8 @@ const UP_STYLE = `<style>
   @media (max-width:30rem){.updlg .two{grid-template-columns:1fr}}
   .updlg label{display:block;font-size:.78rem;color:var(--muted)}
   .updlg label input{display:block;width:100%;margin-top:.2rem}
+  .updlg label.upchk{display:flex;align-items:center;gap:.45rem;font-size:.85rem;color:var(--fg)}
+  .updlg label.upchk input{display:inline;width:auto;margin:0}
   .updlg .opt{font-size:.7rem;opacity:.8}
   .updlg .hint,.updlg .upsum{margin:0;font-size:.8rem;color:var(--muted)}
   .updlg .upl{list-style:none;margin:0;padding:0;overflow-y:auto;min-height:0;max-height:16rem;
@@ -384,6 +387,7 @@ const UP_SCRIPT = `
     if (mode === 'new') {
       if (form.title.value.trim()) body.title = form.title.value.trim()
       if (d.upColl) body.collection = d.upColl
+      if (form.private.checked) body.visibility = 'private'
     } else if (form.message.value.trim()) body.message = form.message.value.trim()
     go.textContent = 'Publishing'
     var r = JSON.parse(await req('POST', '/_up/publish/' + encodeURIComponent(slug) + (mode === 'new' ? '?new=1' : ''), JSON.stringify(body)))
