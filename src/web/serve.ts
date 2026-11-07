@@ -143,9 +143,9 @@ export async function serve(url: URL, email: string | null, env: Env, store: Sha
   .hd .hdup{margin-left:auto}
   .hd .scope+.hdup,.hd .scope+.scope{margin-left:0}
   .chd{display:flex;flex-wrap:wrap;align-items:center;gap:.4rem .9rem}
-  .lst .fd{flex-direction:row;align-items:center;gap:.55rem}
+  .lst a.nm.fd{flex-direction:row;align-items:center;gap:.55rem;text-align:left}
   .lst .fd svg{flex:none;width:18px;height:18px;color:var(--muted)}
-  .lst .nmc{display:flex;flex-direction:column;min-width:0}
+  .lst .fd .nmc{display:flex;flex-direction:column;align-items:flex-start;min-width:0}
   .lst .fd:hover .ti,.lst .fd:hover .slug:only-child{color:var(--link)}
   .lst div.nm a{color:inherit;text-decoration:none}
   .lst div.nm a:hover{color:var(--link)}

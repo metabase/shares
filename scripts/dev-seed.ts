@@ -1,5 +1,6 @@
 // Seed the local dev worker (`bun run dev`) with a realistic dataset for UI
-// work: several owners, every renderer, versions, collections, and older
+// work: several owners, every renderer, versions, collections, private
+// shares and a private collection, and older
 // shares with spread-out times. Every write goes through the worker API.
 // The dataset: scripts/dev-seed/fixtures.ts.
 //
@@ -120,15 +121,19 @@ async function main() {
         ...(s.title !== undefined && { title: s.title }),
         ...(s.collection !== undefined && { collection: s.collection }),
         ...(s.meta && { meta: s.meta }),
+        ...(s.visibility && { visibility: s.visibility }),
       }
       last = (await c.json<PublishResponse>('POST', `/_publish/${enc(s.slug)}`, { json: req })).version
     }
+    // a share seeded before it had a visibility keeps its own on a skip
+    if (skipped && s.visibility) await c.json('POST', `/_api/shares/${enc(s.slug)}`, { json: { visibility: s.visibility } })
     if (s.public) {
       const r = await c.request('POST', `/_public/${enc(s.slug)}`, { body: 'on' })
       const text = (await r.text()).trim()
       if (!r.ok) notes.push(`${s.slug} not public: ${text} (set PUBLIC_SHARING=1 in .dev.vars)`)
     }
-    made.push(`${skipped ? 'same   ' : 'publish'} ${s.slug} v${last} ${email(s.owner)}${s.collection ? ` [${s.collection}]` : ''}`)
+    made.push(`${skipped ? 'same   ' : 'publish'} ${s.slug} v${last} ${email(s.owner)}${s.collection ? ` [${s.collection}]` : ''}${
+      s.visibility === 'private' ? ' private' : ''}`)
   }
 
   // older shares: admin imports with the owner, times and views
