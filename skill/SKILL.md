@@ -48,13 +48,17 @@ share -x report.md standup       # exact slug -> /standup/, no suffix; fails if
                                  #   only for shares meant to be findable
 pbpaste | share -f slides.html   # stdin; .html/.md becomes the share's index
 share -e ./dir cool-name-a3f2b   # new version of an existing share, same URL
+share --private notes.md         # only you can open it (not in others' lists)
+share set <url-or-slug> --org    # change who can read it: --private, --org, --public
+share set <slug> -t "New title" -c team/x -m k=v   # or title, collection, metadata
+share set <slug> -t '' --no-collection             # clear the title, leave the collection
 share                            # list your shares
 share rm cool-name-a3f2b         # delete
 share download cool-name-a3f2b   # pull all files into ./cool-name-a3f2b/
 share download cool-name-a3f2b x # ... into ./x/ (nested paths preserved)
 share cat <url-or-slug>[/file]   # print contents to stdout; pasted URL ok as-is
 share ls <url-or-slug>           # files in a share
-share log <url-or-slug>          # versions, newest first
+share log <url-or-slug>          # visibility, then versions, newest first
 share --local <url>[/file]       # url -> local path it was published from
 share views <url-or-slug>        # who viewed a share (email, count, last)
 share whoami                     # account of the saved token
@@ -65,6 +69,12 @@ share -h                         # full help
 Each publish is a new version; the share URL shows the newest, and
 `<slug>@<n>/` is version n. `share log` lists them.
 
+Visibility: `--org` (the default: anyone with a @metabase.com login),
+`--private` (only you; others get the same answer as for a missing share),
+`--public` (no login; only if the server allows it). `-e` without a flag
+keeps the share's visibility. Do not combine `-x` with `--private`: the
+slug is guessable, and script in any share you open could read it.
+
 ## For agents: --json
 
 Add `--json` to any command: stdout is one JSON value, errors too
@@ -72,7 +82,8 @@ Add `--json` to any command: stdout is one JSON value, errors too
 the human output.
 
 ```bash
-share --json report.md                # {"url","slug","version","files":[...],"public"}
+share --json report.md                # {"url","slug","version","files":[...],"visibility","public"}
+share --json set <slug> --private     # the share: {slug, title, collection, meta, visibility, ...}
 share --json cat <url>                # [{"path","content"}, ...]
 share --json ls <slug>                # file list
 share --json log <slug>               # [{version, message, ...}, ...]
@@ -115,8 +126,9 @@ publish only into its collections, owner `agent:<name>`.
 ## Public shares
 
 Off by default; works only if the server enables it. `share -p file.md` or
-`share public <slug> on|off` makes a share open without login. Ask the user
-before making anything public.
+`share set <slug> --public` makes a share open without login (`share public
+<slug> on|off` still works; off makes a public share org, never private).
+Ask the user before making anything public.
 
 ## What to share
 
