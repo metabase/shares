@@ -6,9 +6,9 @@
 import type { Env } from '../env'
 import { esc, notFound, page } from '../render/page'
 import { ICON, STYLE, copyLink, iconLink, nav, person, privateTag, when } from './shell'
-import { contentBase } from '../origins'
+import { contentBase, hostKind, type HostKind } from '../origins'
 import { canRead, isQueryStore, StoreError, type QueryStore, type ShareStore } from '../store'
-import type { Collection, ShareInfo, VersionInfo, Visibility } from '../api-types'
+import type { Collection, ShareInfo, ShareManifest, VersionInfo, Visibility } from '../api-types'
 import { asText, hunks, lineDiff } from './diff'
 import { uploadToken, uploadUi } from './upload'
 
@@ -56,6 +56,9 @@ export async function sharePage(url: URL, env: Env, store: ShareStore, email: st
   const diff = q.get('diff')?.match(/^(\d+)\.\.(\d+)$/)
   if (diff) detail = await diffSection(store, slug, self, Number(diff[1]), Number(diff[2]))
   else if (q.has('v')) detail = await versionSection(store, share, self, content, Number(q.get('v')), q.get('f'))
+  const live = detail ? null : await store.shareManifest(slug)
+  const paths = new Set(live?.files.map((f) => f.path) ?? [])
+  const opens = paths.has('index.md') || paths.has('index.html') || share.fileCount === 1
 
   const manage = canManage(share, email, env)
   const views = manage ? await store.views(slug) : null
@@ -66,21 +69,27 @@ export async function sharePage(url: URL, env: Env, store: ShareStore, email: st
   const meta = Object.keys(share.meta).length
     ? `<div class="meta"><span>Meta</span><pre>${esc(JSON.stringify(share.meta, null, 2))}</pre></div>` : ''
   const title = share.title || slug
+  const n = share.fileCount
   return page(title, `${STYLE}<div class="app sh">${nav(email, env, 'shares')}${q.has('moved') ? movedNotice(share.collection) : ''}${q.has('published') ? publishedNotice(q.get('published'), content) : ''}
 <div class="top"><div><div class="ttl"><h1 title="${esc(title)}">${esc(title)}</h1>${
   share.visibility === 'private' ? privateTag : ''}</div>
-<p class="slugline">${slugLine(slug, share.collection)}</p></div>
-<div class="acts">${manage && store.commit ? uploadUi({ token: await uploadToken(env, email), mode: 'version', slug }) : ''}${copyLink(content)}${iconLink(`${content}_zip`, 'download', 'Download zip')}<a class="btn pri" href="${esc(content)}">Open</a></div></div>
+<p class="slugline">${slugLine(slug, share.collection)}</p>
+<p class="facts">${person(share.owner, true)}<span>${ACCESS[liveVis(share, env)]}</span><span>v${share.version}, ${n} file${n === 1 ? '' : 's'}, ${
+  bytes(share.totalBytes)}</span><span>Updated ${when(share.updatedAt)}</span></p></div>
+<div class="acts">${manage && store.commit ? uploadUi({ token: await uploadToken(env, email), mode: 'version', slug }) : ''}${copyLink(content)}${
+  iconLink(`${content}_zip`, 'download', 'Download zip')}${iconLink('#details', 'gear', manage ? 'Details and settings' : 'Details')}${
+  opens ? `<a class="btn pri" href="${esc(content)}">Open page</a>` : ''}</div></div>
+${detail ? `<p class="sub"><a href="${self}">Live files</a></p>${detail}` : live ? folderView(live, content, hostKind(url, env)) : ''}
+<h2 id="details">Details</h2>
 <dl class="strip">
 <div><dt>Owner</dt><dd>${person(share.owner, true)}</dd></div>
 <div><dt>Access</dt><dd>${ACCESS[liveVis(share, env)]}</dd></div>
 <div><dt>Collection</dt><dd>${share.collection ? `<a href="/?c=${encodeURIComponent(share.collection)}">${esc(share.collection)}</a>` : '—'}</dd></div>
-<div><dt>Live version</dt><dd>v${share.version}, ${share.fileCount} file${share.fileCount === 1 ? '' : 's'}, ${bytes(share.totalBytes)}</dd></div>
+<div><dt>Live version</dt><dd>v${share.version}, ${n} file${n === 1 ? '' : 's'}, ${bytes(share.totalBytes)}</dd></div>
 <div><dt>Updated</dt><dd>${when(share.updatedAt)}</dd></div>
 <div><dt>Created</dt><dd>${when(share.createdAt)}</dd></div>
 </dl>
 ${meta}
-${detail}
 <h2>Versions</h2>
 ${versionTable(versions, self)}
 ${manage ? `<h2>Views</h2>${viewRows.length
@@ -89,6 +98,57 @@ ${manage ? `<h2>Views</h2>${viewRows.length
 ${manageForms(share, self, email, env, collections)}` : ''}
 </div>
 `, { poll: false })
+}
+
+// The index page of a share, shown below its files like a README: the
+// first of these at the top level of the share.
+const INDEX = ['index.md', 'README.md', 'index.html']
+
+const TYPE: Record<string, string> = {
+  md: 'Markdown', markdown: 'Markdown', html: 'HTML', htm: 'HTML', json: 'JSON', jsonl: 'JSON Lines', ndjson: 'JSON Lines',
+  csv: 'CSV', txt: 'Text', log: 'Text', patch: 'Diff', diff: 'Diff', png: 'Image', jpg: 'Image', jpeg: 'Image',
+  gif: 'Image', webp: 'Image', svg: 'SVG', pdf: 'PDF', js: 'JavaScript', ts: 'TypeScript', py: 'Python',
+  sql: 'SQL', sh: 'Shell', go: 'Go', clj: 'Clojure', yaml: 'YAML', yml: 'YAML', toml: 'TOML', css: 'CSS', zip: 'Zip',
+}
+const typeOf = (path: string) => {
+  const name = path.split('/').pop()!
+  const ext = name.includes('.') ? name.split('.').pop()!.toLowerCase() : ''
+  return TYPE[ext] ?? (ext ? ext.toUpperCase() : 'File')
+}
+
+// The sandbox of the index frame. Split hosts: the frame holds a content
+// host document, which is cross-origin to this page, so its scripts cannot
+// reach the app. One combined host: the frame would be same-origin with
+// this page, so it gets no scripts.
+const SANDBOX = {
+  split: 'allow-scripts allow-same-origin allow-popups allow-popups-to-escape-sandbox allow-downloads',
+  combined: 'allow-same-origin allow-popups allow-popups-to-escape-sandbox',
+}
+
+// The live files grouped by folder (top-level files first), each a link
+// to the file on the content host, then the index page in a frame. User
+// HTML never goes into this document.
+function folderView(man: ShareManifest, content: string, kind: HostKind) {
+  const href = (p: string) => `${content}${p.split('/').map(encodeURIComponent).join('/')}`
+  const dirOf = (p: string) => p.includes('/') ? p.slice(0, p.lastIndexOf('/') + 1) : ''
+  const files = [...man.files].sort((a, b) => dirOf(a.path).localeCompare(dirOf(b.path)) || a.path.localeCompare(b.path))
+  let dir = ''
+  const rows: string[] = []
+  for (const f of files) {
+    const d = dirOf(f.path)
+    if (d !== dir) {
+      dir = d
+      rows.push(`<tr class="dir"><td colspan="3"><span class="fn">${ICON.folder}<span class="mono">${esc(d)}</span></span></td></tr>`)
+    }
+    rows.push(`<tr${d ? ' class="in"' : ''}><td class="w"><a class="fn" href="${esc(href(f.path))}">${ICON.file}<span class="mono">${
+      esc(f.path.slice(d.length))}</span></a></td><td class="ty">${typeOf(f.path)}</td><td class="r">${bytes(f.size)}</td></tr>`)
+  }
+  const index = INDEX.find((name) => man.files.some((f) => f.path === name))
+  const frame = index ? `<section class="rd" aria-label="${esc(index)}"><div class="rdh">${ICON.file}<span class="mono">${esc(index)}</span>
+<a href="${esc(href(index))}">Open</a></div>
+<iframe src="${esc(href(index))}" title="${esc(index)}" sandbox="${SANDBOX[kind === 'combined' ? 'combined' : 'split']}" referrerpolicy="no-referrer" loading="lazy"></iframe></section>` : ''
+  return `<div class="scroll"><table class="fl"><thead><tr><th>Name</th><th>Type</th><th class="r">Size</th></tr></thead><tbody>${rows.join('')}</tbody></table></div>
+${frame}`
 }
 
 // after an upload from the web app: the new version and its link

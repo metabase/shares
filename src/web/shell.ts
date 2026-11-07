@@ -55,16 +55,13 @@ export const STYLE = `<style>
   .lst td{padding:.55rem .5rem;vertical-align:middle;color:var(--muted)}
   .lst tbody tr:hover td{background:var(--hover)}
   .lst td.s{width:100%;min-width:13rem;white-space:normal;color:var(--fg)}
-  .lst .nm{display:flex;flex-direction:column;text-decoration:none;min-width:0}
-  .lst .ti{color:var(--fg);font-size:.95rem;font-weight:500;overflow-wrap:break-word}
-  .lst .slug{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:.78rem;color:var(--muted);overflow-wrap:break-word}
-  .lst .slug:only-child{color:var(--fg);font-size:.85rem}
-  .lst .nm:hover .ti,.lst .nm:hover .slug:only-child{color:var(--link)}
+  .lst .nm{display:flex;flex-wrap:wrap;align-items:center;gap:.2rem .5rem;text-decoration:none;min-width:0}
+  .lst .ti{color:var(--fg);font-size:.95rem;font-weight:500;overflow-wrap:anywhere;min-width:0}
+  .lst .ti.sl{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:.85rem;font-weight:normal}
   .lst .pub{display:inline-block;font-size:.7rem;color:var(--link);border:1px solid var(--link);border-radius:5px;
-    padding:0 .35em;margin-top:.15rem}
+    padding:0 .35em}
   .app .prv{display:inline-flex;align-items:center;gap:.2em;font-size:.7rem;color:var(--acc1);border:1px solid var(--acc1);
     border-radius:5px;padding:0 .35em;vertical-align:middle;white-space:nowrap}
-  .lst .prv{margin-top:.15rem}
   .app .prv svg{width:.85em;height:.85em}
   .sh .ttl{display:flex;align-items:center;gap:.5rem;min-width:0}
   .sh .ttl h1{min-width:0}
@@ -92,6 +89,23 @@ ${[0, 1, 2, 3, 4, 5, 6].map((i) => `  .app .av.h${i}{--av:var(--h${i})}`).join('
     margin:.2rem 0 1.25rem;overflow-wrap:anywhere}
   .sh .slugline a{color:var(--link);text-decoration:none}
   .sh .slugline a:hover{text-decoration:underline}
+  .sh .facts{display:flex;flex-wrap:wrap;align-items:center;gap:.3rem 1rem;font-size:.85rem;color:var(--muted);margin:-.75rem 0 1.25rem}
+  .sh table.fl{width:100%;margin-top:.5rem}
+  .sh .fl .fn{display:inline-flex;align-items:center;gap:.45rem;min-width:0;overflow-wrap:anywhere}
+  .sh .fl .fn svg{flex:none;width:15px;height:15px;color:var(--muted)}
+  .sh .fl a.fn{color:var(--fg);text-decoration:none}
+  .sh .fl a.fn:hover{color:var(--link)}
+  .sh .fl a.fn:hover svg{color:var(--link)}
+  .sh .fl tr.dir td{background:var(--code-bg);color:var(--muted)}
+  .sh .fl tr.in td:first-child{padding-left:1.6rem}
+  .sh .fl td.ty{color:var(--muted);font-size:.8rem;white-space:nowrap}
+  .sh .fl td.r{white-space:nowrap;font-variant-numeric:tabular-nums}
+  .sh .rd{margin:1.5rem 0 0;border:1px solid var(--border);border-radius:8px;overflow:hidden}
+  .sh .rdh{display:flex;align-items:center;gap:.45rem;padding:.45rem .9rem;border-bottom:1px solid var(--border);
+    background:var(--code-bg);font-size:.85rem}
+  .sh .rdh svg{width:15px;height:15px;color:var(--muted)}
+  .sh .rdh a{margin-left:auto;font-size:.8rem}
+  .sh .rd iframe{display:block;width:100%;height:70vh;min-height:20rem;border:0;background:#fff;color-scheme:normal}
   .sh dl.strip{display:flex;flex-wrap:wrap;gap:.4rem 2rem;border:1px solid var(--border);border-radius:8px;
     padding:.6rem 1rem}
   .sh dl.strip dt{font-size:.75rem}
@@ -165,7 +179,7 @@ ${[0, 1, 2, 3, 4, 5, 6].map((i) => `  .app .av.h${i}{--av:var(--h${i})}`).join('
   .app .ic:hover{color:var(--fg)}
   .app .ic svg{display:block;width:16px;height:16px}
   .sh .acts .ic{padding:.4rem}
-  .app button:focus-visible,.app .btn:focus-visible,.app a.nm:focus-visible{outline:2px solid var(--link);outline-offset:2px}
+  .app button:focus-visible,.app .btn:focus-visible,.app a.nm:focus-visible,.lst a.ti:focus-visible,.lst a.cc:focus-visible{outline:2px solid var(--link);outline-offset:2px}
   .app .cb{position:relative}
   .app .cb pre{margin:0;border:1px solid var(--border);padding:.6rem 3rem .6rem .8rem}
   .app .cb pre code.hljs{background:none;padding:0}
@@ -214,6 +228,7 @@ export const ICON = {
   x: svg('<line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/>'),
   folder: svg('<path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/>'),
   lock: svg('<rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/>'),
+  file: svg('<path d="M13 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V9z"/><polyline points="13 2 13 9 20 9"/>'),
   copy: svg('<rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/>'),
 }
 

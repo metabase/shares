@@ -2,6 +2,7 @@ import { afterEach, describe, expect, it } from 'vitest'
 import { env } from 'cloudflare:workers'
 import { sha256Hex } from '../src/store/d1r2'
 import { lineDiff, hunks } from '../src/web/diff'
+import { shortSlug } from '../src/web/serve'
 import { ADMIN, ORIGIN, api, browse, fetchWorker, sessionCookie, slug, userToken } from './helpers'
 
 const OWNER = 'owner@metabase.com'
@@ -41,6 +42,22 @@ const text = async (path: string, email = OWNER) => {
   const r = await browse(path, email)
   return { status: r.status, body: await r.text() }
 }
+
+describe('short slug in a collection view', () => {
+  it('drops the collection words at the start of the slug', () => {
+    expect(shortSlug('metareview-metabase-metabase-pr-86277-0304359f-20261104t181327z', 'metareview/metabase-metabase/pr-86277'))
+      .toBe('0304359f-20261104t181327z')
+    expect(shortSlug('Notes_Y.abc', 'notes/y')).toBe('abc')
+  })
+
+  it('keeps the whole slug when the collection words are not all at its start, or nothing is left', () => {
+    expect(shortSlug('metareview-metabase-metabase-pr-86278-0304359f', 'metareview/metabase-metabase/pr-86277'))
+      .toBe('metareview-metabase-metabase-pr-86278-0304359f')
+    expect(shortSlug('notesy-abc', 'notes/y')).toBe('notesy-abc')
+    expect(shortSlug('notes-y', 'notes/y')).toBe('notes-y')
+    expect(shortSlug('notes-y-', 'notes/y')).toBe('notes-y-')
+  })
+})
 
 describe('line diff', () => {
   it('marks added and removed lines and keeps context around them', () => {
@@ -116,13 +133,12 @@ describe('web app', () => {
     await commit(c, { 'a.md': 'c' }, t, { collection: theirs })
     await commit(d, { 'a.md': 'd' }, o, { collection: other })
     const body = (await text('/')).body
-    const row = (k: string) => `<tr class="col"><td class="s"><a class="nm fd" href="/?c=${encodeURIComponent(k)}">`
+    const row = (k: string) => `<tr class="col"><td class="s"><a class="nm fd" href="/?c=${encodeURIComponent(k)}" title="${k}">`
     expect(body).toContain(row(own))
     expect(body).toContain(row(theirs))
     expect(body).not.toContain(encodeURIComponent(other))
-    expect(body).toMatch(new RegExp(`${encodeURIComponent(theirs)}">.*?<td class="n">2 shares</td>`))
-    expect(body).toContain(`<a class="cl" href="/?c=${encodeURIComponent(theirs)}">${theirs}</a> / <a href=`)
-    expect(body).toContain(`>${c}</a></span>`)
+    expect(body).toMatch(new RegExp(`${encodeURIComponent(theirs)}" title=.*?<td class="n">2 shares</td>`))
+    expect(body).toContain(`<a class="ti sl" href="/_s/${c}" title="${c}">${c}</a><a class="cc" href="/?c=${encodeURIComponent(theirs)}" title="Collection ${theirs}">${theirs}</a>`)
     // one list by update time: the newest collection row comes before the older share row
     expect(body.indexOf(row(theirs))).toBeLessThan(body.indexOf(`data-p="/${a}/"`))
   })
@@ -147,7 +163,7 @@ describe('web app', () => {
     const col = `qc/${slug('c')}`
     await commit(slug('qc'), { 'a.md': 'a' }, t, { collection: col })
     expect((await api('PUT', `/_api/collections/${col}`, { token: t, body: JSON.stringify({ title: 'Pangolin reports' }) })).status).toBe(200)
-    const row = `<a class="nm fd" href="/?c=${encodeURIComponent(col)}">`
+    const row = `<a class="nm fd" href="/?c=${encodeURIComponent(col)}" title="${col}">`
     expect((await text('/?q=pangol')).body).toContain(row)
     expect((await text(`/?q=${col.split('/')[1]}&view=collections`)).body).toContain(row)
     expect((await text('/?q=narwhalzz')).body).not.toContain(row)
@@ -173,10 +189,10 @@ describe('web app', () => {
     const o = await userToken(OTHER)
     const col = `ad/${slug('c')}`
     await commit(slug('ad'), { 'a.md': 'a' }, o, { collection: col })
-    const row = `<a class="nm fd" href="/?c=${encodeURIComponent(col)}">`
+    const row = `<a class="nm fd" href="/?c=${encodeURIComponent(col)}" title="${col}">`
     const every = (await text('/', ADMIN)).body
     expect(every).toContain(row)
-    expect(every).toMatch(new RegExp(`${encodeURIComponent(col)}">.*?<td class="o">`))
+    expect(every).toMatch(new RegExp(`${encodeURIComponent(col)}" title=.*?<td class="o">`))
     expect((await text('/?mine', ADMIN)).body).not.toContain(row)
   })
 
@@ -188,6 +204,7 @@ describe('web app', () => {
 
     const p = await text(`/_s/${top}`)
     expect(p.status).toBe(200)
+    expect(p.body).not.toContain('<script>x</script>')
     expect(p.body).toContain('second')
     expect(p.body).toContain(`?diff=1..2`)
 
@@ -210,14 +227,107 @@ describe('web app', () => {
     await commit(top, { 'a.md': 'a' }, t)
     const list = (await text('/')).body
     expect(list).toMatch(new RegExp(`class="ic cp" data-u="[^"]*/${top}/" aria-label="Copy link" title="Copy link"><svg`))
-    expect(list).toContain(`href="/_s/${top}" aria-label="Settings" title="Settings"><svg`)
+    expect(list).not.toContain('aria-label="Settings"')
     expect(list.match(/id="toast" role="status" aria-live="polite"/g)).toHaveLength(1)
     expect(list).toContain('<link rel="icon" href="data:image/svg+xml,')
     expect(list).toContain(encodeURIComponent('🔗'))
     const sh = (await text(`/_s/${top}`)).body
     expect(sh).toContain('aria-label="Copy link"')
     expect(sh).toMatch(/href="[^"]*_zip" aria-label="Download zip" title="Download zip"><svg/)
-    expect(sh).toMatch(/class="btn pri" href="[^"]*">Open<\/a>/)
+    expect(sh).toMatch(/href="#details" aria-label="Details and settings" title="Details and settings"><svg/)
+    expect(sh).toMatch(/class="btn pri" href="[^"]*">Open page<\/a>/)
+  })
+
+  it('links a share row and its file count to the folder view, and keeps the copy link on the content URL', async () => {
+    const t = await userToken(OWNER)
+    const top = slug('row')
+    await commit(top, { 'a.md': 'a', 'b.md': 'b' }, t, { title: 'Row title' })
+    const list = (await text('/')).body
+    expect(list).toContain(`<div class="nm"><a class="ti" href="/_s/${top}" title="${top}">Row title</a></div>`)
+    expect(list).not.toContain(`>${top}<`)
+    expect(list).toContain(`<td class="n"><a href="/_s/${top}">2 files</a></td>`)
+    expect(list).toContain(`data-u="/${top}/"`)
+    expect(list).not.toContain(`href="/${top}/"`)
+  })
+
+  it('shows a share row in a collection view without the collection words at the start of its slug, linked by the full slug', async () => {
+    const t = await userToken(OWNER)
+    const col = `fv/${slug('c')}`
+    const top = `${col.replace('/', '-')}-0304359f`, other = slug('crow')
+    await commit(top, { 'a.md': 'a' }, t, { collection: col })
+    await commit(other, { 'a.md': 'a' }, t, { collection: col })
+    const list = (await text(`/?c=${encodeURIComponent(col)}`)).body
+    expect(list).toContain(`<a class="ti sl" href="/_s/${top}" title="${top}">0304359f</a></div>`)
+    expect(list).toContain(`<a class="ti sl" href="/_s/${other}" title="${other}">${other}</a></div>`)
+    expect(list).not.toContain('class="cc"')
+  })
+
+  it('shows a collection row by its title, else its slug, with the slug as the hover title', async () => {
+    const t = await userToken(OWNER)
+    const [named, bare] = [`cn/${slug('c')}`, `cb/${slug('c')}`]
+    await commit(slug('cn'), { 'a.md': 'a' }, t, { collection: named })
+    await commit(slug('cb'), { 'a.md': 'a' }, t, { collection: bare })
+    expect((await api('PUT', `/_api/collections/${named}`, { token: t, body: JSON.stringify({ title: 'Kestrel runs' }) })).status).toBe(200)
+    const body = (await text('/?view=collections')).body
+    expect(body).toMatch(new RegExp(`title="${named}"><svg[^]*?</svg><span class="ti">Kestrel runs</span></a>`))
+    expect(body).toMatch(new RegExp(`title="${bare}"><svg[^]*?</svg><span class="ti sl">${bare}</span></a>`))
+  })
+
+  it('shows the live files of a share grouped by folder, each linked to the content URL, without file contents', async () => {
+    const t = await userToken(OWNER)
+    const top = slug('fv')
+    await commit(top, { 'a.md': 'old' }, t)
+    await commit(top, {
+      'index.html': '<script>alert(1)</script>', 'report.html': '<b>r</b>', 'findings.json': '{}',
+      'nodes/b.md': '# <img src=x onerror=alert(2)>', 'nodes/a.md': 'a', 'diff.patch': '-x\n+y\n',
+    }, t)
+    const body = (await text(`/_s/${top}`)).body
+    const names = [...body.matchAll(/<a class="fn" href="([^"]*)">.*?<span class="mono">([^<]*)<\/span><\/a>/g)].map((m) => [m[1], m[2]])
+    expect(names).toEqual([
+      [`/${top}/diff.patch`, 'diff.patch'], [`/${top}/findings.json`, 'findings.json'], [`/${top}/index.html`, 'index.html'],
+      [`/${top}/report.html`, 'report.html'], [`/${top}/nodes/a.md`, 'a.md'], [`/${top}/nodes/b.md`, 'b.md'],
+    ])
+    expect(body).toContain('<tr class="dir"><td colspan="3"><span class="fn">')
+    expect(body).toContain('<span class="mono">nodes/</span>')
+    expect(body).toContain('<td class="ty">Diff</td>')
+    expect(body).not.toContain('a.md</span></a></td><td class="ty">Markdown</td><td class="r">3 B')
+    expect(body).not.toContain('alert(')
+    expect(body).not.toContain('<b>r</b>')
+  })
+
+  it('shows the index page in a sandboxed frame: index.md, else README.md, else index.html', async () => {
+    const t = await userToken(OWNER)
+    const frameOf = async (files: Record<string, string>) => {
+      const top = slug('ix')
+      await commit(top, files, t)
+      const body = (await text(`/_s/${top}`)).body
+      return { top, body, src: body.match(/<iframe src="([^"]*)"/)?.[1], sandbox: body.match(/<iframe [^>]*sandbox="([^"]*)"/)?.[1] }
+    }
+    const md = await frameOf({ 'index.md': '<script>alert(1)</script>', 'README.md': 'r', 'index.html': 'h' })
+    expect(md.src).toBe(`/${md.top}/index.md`)
+    expect(md.sandbox).toBe('allow-same-origin allow-popups allow-popups-to-escape-sandbox')
+    expect(md.body).not.toContain('alert(1)')
+    expect(md.body).toContain('">Open page</a>')
+    expect((await frameOf({ 'README.md': 'r', 'index.html': 'h', 'x.txt': 'x' })).src).toMatch(/\/README\.md$/)
+    const rd = await frameOf({ 'README.md': 'r', 'x.txt': 'x' })
+    expect(rd.src).toBe(`/${rd.top}/README.md`)
+    expect(rd.body).not.toContain('">Open page</a>')
+    expect((await frameOf({ 'index.html': 'h', 'x.txt': 'x' })).src).toMatch(/\/index\.html$/)
+    const none = await frameOf({ 'a.txt': 'a', 'b.txt': 'b' })
+    expect(none.src).toBeUndefined()
+    expect(none.body).not.toContain('">Open page</a>')
+    expect((await frameOf({ 'only.csv': 'a,b' })).body).toContain('">Open page</a>')
+  })
+
+  it('shows the files of an old version in place of the live files', async () => {
+    const t = await userToken(OWNER)
+    const top = slug('old')
+    await commit(top, { 'one.md': '1' }, t)
+    await commit(top, { 'two.md': '2' }, t)
+    const body = (await text(`/_s/${top}?v=1`)).body
+    expect(body).toContain('<h2>Files of v1</h2>')
+    expect(body).not.toContain('class="fl"')
+    expect(body).toContain(`<a href="/_s/${top}">Live files</a>`)
   })
 
   it('shows the manage forms and views to the owner only', async () => {

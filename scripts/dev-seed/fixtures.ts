@@ -39,7 +39,7 @@ export interface Imported {
 export interface CollectionSpec {
   slug: string
   owner: Owner
-  title: string
+  title?: string
   meta?: Record<string, string | number | boolean>
 }
 
@@ -233,6 +233,16 @@ The change is small and the tests cover the main path. Two findings need a fix b
 - [ ] Docs updated
 `
 
+const runIndexHtml = (pr: number) => `<!doctype html><meta charset="utf-8"><title>Run: PR ${pr}</title>
+<style>body{font:15px/1.5 system-ui,sans-serif;margin:1.5rem}.ok{color:#1a7f37}</style>
+<h1>Metareview run: PR ${pr}</h1>
+<p id="st">Loading findings...</p>
+<ul><li><a href="report.html">Report</a></li><li><a href="findings.json">findings.json</a></li><li><a href="diff.patch">diff.patch</a></li></ul>
+<script>fetch('findings.json').then(function (r) { return r.json() }).then(function (j) {
+  var p = document.getElementById('st'); p.className = 'ok'; p.textContent = j.findings.length + ' findings'
+})</script>
+`
+
 const meetingNotes = (topic: string, i: number) => `# ${topic}
 
 Attendees: Ana, Sam, Priya
@@ -258,6 +268,9 @@ export const COLLECTIONS: CollectionSpec[] = [
   { slug: 'analytics', owner: 'sam.chen@metabase.com', title: 'Analytics exports' },
   // only private shares: a private collection
   { slug: 'drafts/priya', owner: 'priya.rao@metabase.com', title: 'Planning drafts' },
+  // the slugs of an agent publish: long, no collection title, share slugs
+  // that start with the collection words
+  { slug: 'metareview/metabase-metabase/pr-86277', owner: 'admin', meta: { repo: 'metabase/metabase', pr: 86277 } },
 ]
 
 export const PUBLISHED: Published[] = [
@@ -337,6 +350,21 @@ export const PUBLISHED: Published[] = [
       { message: 'run 2 after fixes', files: { 'review.md': reviewMd(48211, 'cache dashboard card results', 'approve'), 'findings.json': findings(48211, 1) } }],
   },
   {
+    // the layout of a metareview run: an index page, a report, findings,
+    // one file per node in a subfolder, and the diff under review
+    slug: 'mr-48307-run', owner: 'priya.rao@metabase.com', title: 'Metareview run: PR 48307', collection: 'metareview/pr-2',
+    meta: { pr: 48307, run: 2 },
+    versions: [{ files: {
+      'index.html': runIndexHtml(48307),
+      'report.html': `<!doctype html><meta charset="utf-8"><title>Report</title><h1>Report: PR 48307</h1><p>2 findings, both low.</p>`,
+      'findings.json': findings(48307, 2),
+      'nodes/plan.md': '# Plan\n\nRead the diff, then the sync retry code.\n',
+      'nodes/review-sync.md': reviewMd(48307, 'sync retry backoff', 'approve'),
+      'nodes/review-tests.md': '# Tests\n\nThe new test covers the backoff cap.\n',
+      'diff.patch': '--- a/src/metabase/sync/core.clj\n+++ b/src/metabase/sync/core.clj\n@@ -40,3 +40,3 @@\n-  (retry 0)\n+  (retry (backoff n))\n',
+    } }],
+  },
+  {
     slug: 'mr-48211-perf', owner: 'priya.rao@metabase.com', title: 'Perf check: PR 48211', collection: 'metareview/pr-1',
     meta: { pr: 48211, kind: 'perf' },
     versions: [{ files: { 'timings.csv': 'case,before_ms,after_ms\ndashboard 12 cards,840,310\ndashboard 40 cards,2900,760\nsingle card,120,118\n' } }],
@@ -350,6 +378,17 @@ export const PUBLISHED: Published[] = [
     slug: 'mr-48307-logs', owner: 'priya.rao@metabase.com', title: 'Agent log: PR 48307', collection: 'metareview/pr-2',
     meta: { pr: 48307, kind: 'log' },
     versions: [{ files: { 'run.log': Array.from({ length: 40 }, (_, i) => `2026-10-29T14:${String(i).padStart(2, '0')}:00Z step ${i}: ${i % 7 ? 'ok' : 'retry'}`).join('\n') + '\n' } }],
+  },
+  {
+    slug: 'metareview-metabase-metabase-pr-86277-0304359f-20261104t181327z', owner: 'admin',
+    title: 'metabase/metabase#86277 review @0304359f 2026-11-04 18:13Z', collection: 'metareview/metabase-metabase/pr-86277',
+    meta: { pr: 86277, sha: '0304359f' },
+    versions: [{ files: { 'index.html': runIndexHtml(86277), 'findings.json': findings(86277, 3) } }],
+  },
+  {
+    slug: 'metareview-metabase-metabase-pr-86277-9a1c22e7-20261105t091102z', owner: 'admin', collection: 'metareview/metabase-metabase/pr-86277',
+    meta: { pr: 86277, sha: '9a1c22e7' },
+    versions: [{ files: { 'index.html': runIndexHtml(86277), 'findings.json': findings(86277, 1) } }],
   },
   {
     slug: 'retro-notes', owner: 'priya.rao@metabase.com', title: 'Q3 retro notes', visibility: 'private',

@@ -184,25 +184,74 @@ describe('app host', () => {
     }
   })
 
-  it('links the listing to the content host', async () => {
+  it('links listing rows to the folder view and copies the content host link', async () => {
     const token = await userToken('lin@metabase.com')
     const top = slug('lst')
     await publish(top, { 'a.txt': 'a' }, token)
     const cookie = await appCookie('lin@metabase.com')
     const list = await (await onApp('/', { headers: { ...NAV, cookie } })).text()
-    expect(list).toContain(`href="${CONTENT}/${top}/"`)
+    expect(list).toContain(`href="/_s/${top}"`)
+    expect(list).toContain(`data-u="${CONTENT}/${top}/"`)
     expect(list).toContain(`data-p="/${top}/"`)
   })
 
-  it('returns the full main file text from _peek?full', async () => {
+  it('returns the first file paths from _peek and all of them with ?full', async () => {
     const top = slug('full')
-    const body = Array.from({ length: 30 }, (_, i) => `line ${i}`).join('\n')
-    await publish(top, { 'index.md': body })
+    const files = Object.fromEntries(Array.from({ length: 30 }, (_, i) => [`f${String(i).padStart(2, '0')}.txt`, `${i}`]))
+    await publish(top, files)
     const cookie = await appCookie('pat@metabase.com')
-    const short = await (await onApp(`/${top}/_peek`, { headers: { cookie } })).json<{ text: string }>()
-    expect(short.text.split('\n')).toHaveLength(10)
+    const short = await (await onApp(`/${top}/_peek`, { headers: { cookie } })).json<{ file: string; text: string }>()
+    expect(short.file).toBe('30 files')
+    expect(short.text.split('\n')).toEqual([...Object.keys(files).slice(0, 12), '… 18 more'])
     const full = await (await onApp(`/${top}/_peek?full`, { headers: { cookie } })).json<{ text: string }>()
-    expect(full.text).toBe(body)
+    expect(full.text).toBe(Object.keys(files).join('\n'))
+  })
+
+  it('frames the index page from the content host with scripts in a sandbox', async () => {
+    const top = slug('frm')
+    await publish(top, { 'index.html': '<script>alert(1)</script>', 'a.txt': 'a' }, await userToken('pat@metabase.com'))
+    const cookie = await appCookie('pat@metabase.com')
+    const r = await onApp(`/_s/${top}`, { headers: { ...NAV, cookie } })
+    const body = await r.text()
+    expect(body).toContain(`<iframe src="${CONTENT}/${top}/index.html"`)
+    expect(body).toContain('sandbox="allow-scripts allow-same-origin allow-popups allow-popups-to-escape-sandbox allow-downloads"')
+    expect(body).toContain(`<a class="fn" href="${CONTENT}/${top}/a.txt">`)
+    expect(body).not.toContain('alert(1)')
+    expect(r.headers.get('content-security-policy')).toBe("frame-ancestors 'none'")
+    // the content host answers the frame: it does not refuse framing
+    const c = await onContent(`/${top}/index.html`, { headers: { ...NAV, 'sec-fetch-dest': 'iframe', cookie: await contentCookie('pat@metabase.com') } })
+    expect(c.status).toBe(200)
+    expect(c.headers.get('x-frame-options')).toBeNull()
+  })
+
+  it('logs in to the content host from a same-site frame, not from a cross-site one', async () => {
+    const cookie = await appCookie('pat@metabase.com')
+    const to = `/_login?to=${encodeURIComponent('/x/index.md')}`
+    const frame = { 'sec-fetch-mode': 'navigate', 'sec-fetch-dest': 'iframe', accept: 'text/html' }
+    const ok = await onApp(to, { headers: { ...frame, 'sec-fetch-site': 'same-site', cookie } })
+    expect(ok.status).toBe(302)
+    expect(new URL(ok.headers.get('location')!).origin).toBe(CONTENT)
+    const cross = await onApp(to, { headers: { ...frame, 'sec-fetch-site': 'cross-site', cookie } })
+    expect(cross.status).toBe(403)
+    const shareFrame = await onApp('/', { headers: { ...frame, 'sec-fetch-site': 'same-site', cookie } })
+    expect(shareFrame.status).toBe(403)
+  })
+
+  it('does not count the index frame as a view', async () => {
+    const top = slug('fview')
+    await publish(top, { 'index.md': '# v' })
+    const cookie = await contentCookie('vic@metabase.com')
+    await onContent(`/${top}/index.md`, { headers: { ...NAV, 'sec-fetch-dest': 'iframe', cookie } })
+    await onContent(`/${top}/index.md`, { headers: { ...NAV, cookie } })
+    const views = (await (await api('GET', `/${top}/_views`)).text()).split('\n').filter(Boolean)
+    expect(views.map((l) => l.split('\t').slice(0, 2))).toEqual([['vic@metabase.com', '1']])
+  })
+
+  it('links the content host directory listing to the folder view', async () => {
+    const top = slug('dl')
+    await publish(top, { 'a.txt': 'a', 'b.txt': 'b' })
+    const r = await onContent(`/${top}/`, { headers: { ...NAV, cookie: await contentCookie('pat@metabase.com') } })
+    expect(await r.text()).toContain(`<a href="${APP}/_s/${top}">open in shares</a>`)
   })
 })
 

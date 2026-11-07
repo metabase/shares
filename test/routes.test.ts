@@ -100,7 +100,7 @@ describe('publish and read', () => {
     const top = slug('peek')
     await publish(top, { 'index.md': 'line one\nline two', 'x.txt': 'x' })
     const peek = await browse(`/${top}/_peek`, ADMIN, { accept: '*/*' })
-    expect(await peek.json()).toEqual({ file: 'index.md', text: 'line one\nline two' })
+    expect(await peek.json()).toEqual({ file: '2 files', text: 'index.md\nx.txt' })
     const zip = await browse(`/${top}/_zip`, ADMIN, { accept: '*/*' })
     expect(zip.headers.get('content-type')).toBe('application/zip')
     expect(zip.headers.get('content-disposition')).toBe(`attachment; filename="${top}.zip"`)
