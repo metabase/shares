@@ -6,10 +6,10 @@
 
 import type { Env } from '../env'
 import { esc, notFound, page } from '../render/page'
-import { ICON, STYLE, copyLink, iconLink, nav, person, when } from './shell'
+import { ICON, STYLE, copyLink, iconLink, nav, person, privateTag, when } from './shell'
 import { contentBase } from '../origins'
 import { canRead, isQueryStore, StoreError, type QueryStore, type ShareStore } from '../store'
-import type { Collection, ShareInfo, VersionInfo } from '../api-types'
+import type { Collection, ShareInfo, VersionInfo, Visibility } from '../api-types'
 import { asText, hunks, lineDiff } from './diff'
 import { uploadToken, uploadUi } from './upload'
 
@@ -23,6 +23,16 @@ const bytes = (n: number) =>
   n < 1024 ? `${n} B` : n < 1048576 ? `${(n / 1024).toFixed(1)} KB` : `${(n / 1048576).toFixed(1)} MB`
 
 const canManage = (share: ShareInfo, email: string, env: Env) => share.owner === email || email === env.ADMIN_EMAIL
+
+const ACCESS: Record<Visibility, string> = {
+  private: 'Only you',
+  org: 'Anyone at Metabase',
+  public: 'Anyone with the link (no login)',
+}
+
+// the visibility that applies now: public reads as org while the flag is off
+const liveVis = (share: ShareInfo, env: Env): Visibility =>
+  share.visibility === 'public' && env.PUBLIC_SHARING !== '1' ? 'org' : share.visibility
 
 // the answer for a slug without a share, and for a share the reader may
 // not read: the two must be the same
@@ -58,11 +68,13 @@ export async function sharePage(url: URL, env: Env, store: ShareStore, email: st
     ? `<div class="meta"><span>Meta</span><pre>${esc(JSON.stringify(share.meta, null, 2))}</pre></div>` : ''
   const title = share.title || slug
   return page(title, `${STYLE}<div class="app sh">${nav(email, env, 'shares')}${q.has('moved') ? movedNotice(share.collection) : ''}${q.has('published') ? publishedNotice(q.get('published'), content) : ''}
-<div class="top"><div><h1 title="${esc(title)}">${esc(title)}</h1>
+<div class="top"><div><div class="ttl"><h1 title="${esc(title)}">${esc(title)}</h1>${
+  share.visibility === 'private' ? privateTag : ''}</div>
 <p class="slugline">${slugLine(slug, share.collection)}</p></div>
 <div class="acts">${manage && store.commit ? uploadUi({ token: await uploadToken(env, email), mode: 'version', slug }) : ''}${copyLink(content)}${iconLink(`${content}_zip`, 'download', 'Download zip')}<a class="btn pri" href="${esc(content)}">Open</a></div></div>
 <dl class="strip">
 <div><dt>Owner</dt><dd>${person(share.owner, true)}</dd></div>
+<div><dt>Access</dt><dd>${ACCESS[liveVis(share, env)]}</dd></div>
 <div><dt>Collection</dt><dd>${share.collection ? `<a href="/?c=${encodeURIComponent(share.collection)}">${esc(share.collection)}</a>` : '—'}</dd></div>
 <div><dt>Live version</dt><dd>v${share.version}, ${share.fileCount} file${share.fileCount === 1 ? '' : 's'}, ${bytes(share.totalBytes)}</dd></div>
 <div><dt>Updated</dt><dd>${when(share.updatedAt)}</dd></div>
@@ -187,9 +199,12 @@ function movedNotice(collection: string | null) {
 function manageForms(share: ShareInfo, self: string, email: string, env: Env, collections: Collection[]) {
   const form = (action: string, body: string, cls = '') =>
     `<form method="post" action="${self}"${cls ? ` class="${cls}"` : ''}><input type="hidden" name="action" value="${action}">${body}</form>`
-  const lose = email === share.owner && email !== env.ADMIN_EMAIL ? ' You lose edit access.' : ''
+  const owner = email === share.owner
+  const lose = !owner || email === env.ADMIN_EMAIL ? ''
+    : share.visibility === 'private' ? ' A private share stays private: you lose access to it.' : ' You lose edit access.'
   return `<h2>Settings</h2>
 <div class="frm">
+${accessForm(share, email, env, form)}
 ${form('title', `<label>Title<input name="title" value="${esc(share.title ?? '')}" maxlength="500" placeholder="${esc(share.slug)}"></label>
 <button class="pri">Save</button><p class="hint">An empty title shows the slug.</p>`)}
 ${movePicker(share, self, collections)}
@@ -201,6 +216,24 @@ ${form('transfer', `<label>Transfer to<input name="to" type="email" placeholder=
 ${form('delete', `<label>Type the slug to confirm<input name="confirm" placeholder="${esc(share.slug)}" required></label>
 <button class="danger">Delete</button><p class="hint">Deletes every version and its files. This cannot be undone.</p>`, 'dz')}
 </div>`
+}
+
+// Owner: a choice of the three access levels (public only while the flag
+// is on). Admin on another owner's public share: only public -> org.
+function accessForm(share: ShareInfo, email: string, env: Env, form: (action: string, body: string) => string) {
+  const cur = liveVis(share, env)
+  if (email !== share.owner) {
+    return share.visibility === 'public' ? form('visibility', `<p class="acc">Access: ${cur === 'public'
+      ? ACCESS.public : 'public, read as org while public sharing is off'}</p>
+<input type="hidden" name="visibility" value="org"><button>Make org-only</button>
+<p class="hint">Only people signed in at Metabase can open it after this.</p>`) : ''
+  }
+  const opts: Visibility[] = env.PUBLIC_SHARING === '1' ? ['private', 'org', 'public'] : ['private', 'org']
+  const radios = opts.map((v) =>
+    `<label><input type="radio" name="visibility" value="${v}"${v === cur ? ' checked' : ''}>${ACCESS[v]}</label>`).join('\n')
+  return form('visibility', `<fieldset><legend>Access</legend>
+${radios}</fieldset>
+<button>Save</button><p class="hint">Only you: other people do not see it in lists or search, and a person you send the link to cannot open it.</p>`)
 }
 
 // The collection of the share as a path chip with a Move button. Move
@@ -297,6 +330,14 @@ export async function managePost(req: Request, url: URL, env: Env, store: ShareS
       case 'title':
         await store.setAttrs(slug, { title: field('title') || null }, email)
         return back()
+      case 'visibility': {
+        const v = field('visibility') as Visibility
+        if (!Object.hasOwn(ACCESS, v)) return new Response('bad visibility\n', { status: 400 })
+        // admin changes another owner's share only to org
+        if (share.owner !== email && v !== 'org') return message('Forbidden', 'Only the owner sets this access.', 403)
+        await store.setAttrs(slug, { visibility: v }, email)
+        return back()
+      }
       case 'move': {
         const to = (field('new') || field('collection')).toLowerCase().replace(/^\/+|\/+$/g, '') || null
         await store.setAttrs(slug, { collection: to }, email)

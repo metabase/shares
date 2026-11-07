@@ -62,6 +62,13 @@ export const STYLE = `<style>
   .lst .nm:hover .ti,.lst .nm:hover .slug:only-child{color:var(--link)}
   .lst .pub{display:inline-block;font-size:.7rem;color:var(--link);border:1px solid var(--link);border-radius:5px;
     padding:0 .35em;margin-top:.15rem}
+  .app .prv{display:inline-flex;align-items:center;gap:.2em;font-size:.7rem;color:var(--acc1);border:1px solid var(--acc1);
+    border-radius:5px;padding:0 .35em;vertical-align:middle;white-space:nowrap}
+  .lst .prv{margin-top:.15rem}
+  .app .prv svg{width:.85em;height:.85em}
+  .sh .ttl{display:flex;align-items:center;gap:.5rem;min-width:0}
+  .sh .ttl h1{min-width:0}
+  .sh .ttl .prv{flex:none;font-size:.75rem}
   .app .rec{color:var(--fg)}
   .app .old{color:var(--muted)}
   .app .who{display:inline-flex;align-items:center;gap:.4rem;vertical-align:middle}
@@ -97,6 +104,11 @@ ${[0, 1, 2, 3, 4, 5, 6].map((i) => `  .app .av.h${i}{--av:var(--h${i})}`).join('
   .sh .frm label input{display:block;width:100%;margin-top:.2rem}
   .sh .frm .hint{grid-column:1/-1;font-size:.75rem;color:var(--muted);margin:0}
   .sh .frm form.dz{border:1px solid color-mix(in srgb,var(--danger) 45%,transparent);border-radius:8px;padding:.75rem 1rem}
+  .sh .frm fieldset{grid-column:1;border:0;margin:0;padding:0;display:grid;gap:.35rem;min-width:0}
+  .sh .frm legend{font-size:.78rem;color:var(--muted);padding:0;margin-bottom:.2rem}
+  .sh .frm fieldset label{display:flex;align-items:center;gap:.45rem;font-size:.85rem;color:var(--fg)}
+  .sh .frm fieldset label input{display:inline;width:auto;margin:0}
+  .sh .frm .acc{font-size:.85rem;margin:0;grid-column:1}
   .sh .dzh{color:var(--danger);font-size:.85rem;margin:.5rem 0 0}
   @media (max-width:30rem){.sh .frm .two{grid-template-columns:1fr}}
   .sh .moved{border:1px solid var(--border);border-radius:8px;padding:.4rem .8rem;font-size:.85rem;margin:0 0 1rem}
@@ -200,8 +212,12 @@ export const ICON = {
   gear: svg('<circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/>'),
   download: svg('<path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/>'),
   x: svg('<line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/>'),
+  lock: svg('<rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/>'),
   copy: svg('<rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/>'),
 }
+
+// The tag of a private share, in lists and the share page header.
+export const privateTag = `<span class="prv" title="Only the owner can open it">${ICON.lock}private</span>`
 
 // An icon button that copies url (absolute, or relative to the page).
 export function copyLink(url: string) {
