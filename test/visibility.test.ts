@@ -179,15 +179,20 @@ describe('lists leave out private shares of others', () => {
     expect(await listed(`owner=${PAT}`)).not.toContain(priv)
     expect(await listed('limit=1000')).not.toContain(priv)
 
+    // a public share of SAM makes col readable by everyone; PAT's private
+    // share stays out of the count of others
+    const open = slug('vis-open')
+    expect((await commit(open, { 'x.md': 'x' }, { collection: col }, samToken)).status).toBe(200)
     const count = async (token?: string) => {
       const all = await (await api('GET', `/_api/collections?prefix=${col}`, { token })).json<Collection[]>()
       const one = await (await api('GET', `/_api/collections/${col}`, { token })).json<Collection>()
       expect(all.map((c) => c.shares)).toEqual([one.shares])
       return one.shares
     }
-    expect(await count(patToken)).toBe(1)
-    expect(await count(samToken)).toBe(0)
-    expect(await count()).toBe(0)
+    expect(await count(patToken)).toBe(2)
+    expect(await count(samToken)).toBe(1)
+    expect(await count()).toBe(1)
+    await api('DELETE', `/${open}/`, { token: samToken })
   })
 
   it('admin bare _list lists it for its owner only', async () => {
@@ -202,6 +207,108 @@ describe('lists leave out private shares of others', () => {
         expect((await (await b(p)).text()).includes(`/${priv}/`), `${who} ${p}`).toBe(sees)
       }
     }
+  })
+})
+
+describe('private collections', () => {
+  // `pc` holds only PAT's private share `p1`
+  let pc: string, p1: string, nocol: string
+  beforeAll(async () => {
+    pc = slug('pcol')
+    p1 = slug('pcol-share')
+    nocol = slug('pcol-missing')
+    expect((await commit(p1, { 'x.md': 'x' }, { collection: pc, visibility: 'private' }, patToken)).status).toBe(200)
+  })
+
+  const getCol = async (c: string, token?: string) => {
+    const r = await api('GET', `/_api/collections/${c}`, { token })
+    return { status: r.status, body: await r.json<any>() }
+  }
+  const listCols = async (prefix: string, token?: string) =>
+    (await (await api('GET', `/_api/collections?prefix=${prefix}`, { token })).json<Collection[]>()).map((c) => c.slug)
+
+  it('answers others, admin included, as for a missing collection', async () => {
+    for (const [who, token] of [[SAM, samToken], [ADMIN, undefined]] as const) {
+      const b = await browser(who, ORIGIN)
+      const a = await answer(await b(`/?c=${pc}`), pc)
+      expect(a).toEqual(await answer(await b(`/?c=${nocol}`), nocol))
+      expect(a.body).toContain(NOT_FOUND)
+      expect(await getCol(pc, token)).toEqual(await getCol(nocol, token))
+      expect((await getCol(pc, token)).status).toBe(404)
+      expect(await listCols(pc, token)).toEqual([])
+      expect(await (await b('/_collections')).text()).not.toContain(pc)
+    }
+  })
+
+  it('is left out of the move picker of others', async () => {
+    const own = slug('pcol-sam')
+    expect((await commit(own, { 'x.md': 'x' }, {}, samToken)).status).toBe(200)
+    const html = await (await (await browser(SAM, ORIGIN))(`/_s/${own}`)).text()
+    expect(html).toContain('class="pick"')
+    expect(html).not.toContain(pc)
+    expect(await (await (await browser(PAT, ORIGIN))(`/_s/${p1}`)).text()).toContain(`value="${pc}"`)
+  })
+
+  it('is readable by its owner', async () => {
+    expect((await (await (await browser(PAT, ORIGIN))(`/?c=${pc}`)).text())).toContain(`/${p1}/`)
+    expect((await getCol(pc, patToken)).body).toMatchObject({ slug: pc, owner: PAT, shares: 1 })
+    expect(await listCols(pc, patToken)).toEqual([pc])
+  })
+
+  it('refuses a collection update by others without its owner', async () => {
+    for (const token of [samToken, undefined]) {
+      const r = await api('PUT', `/_api/collections/${pc}`, { token, body: JSON.stringify({ title: 'taken' }) })
+      expect(r.status).toBe(403)
+      expect(await r.text()).not.toContain(PAT)
+    }
+    expect((await getCol(pc, patToken)).body.title).toBe(null)
+  })
+
+  it('takes a publish by slug from others and shows the collection to the owner of a share in it', async () => {
+    const pc2 = slug('pcol2')
+    expect((await commit(slug('pcol2-pat'), { 'x.md': 'x' }, { collection: pc2, visibility: 'private' }, patToken)).status).toBe(200)
+    const theirs = slug('pcol2-sam')
+    expect((await commit(theirs, { 'x.md': 'x' }, { collection: pc2, visibility: 'private' }, samToken)).status).toBe(200)
+    expect((await getCol(pc2, samToken)).body).toMatchObject({ slug: pc2, owner: PAT, shares: 1 })
+    expect(await listCols(pc2, samToken)).toEqual([pc2])
+    const page = await (await (await browser(SAM, ORIGIN))(`/?c=${pc2}`)).text()
+    expect(page).toContain(`/${theirs}/`)
+    expect((await getCol(pc2)).status).toBe(404)
+  })
+
+  it('turns readable by others when one of its shares turns org', async () => {
+    const pc3 = slug('pcol3')
+    const p3 = slug('pcol3-share')
+    expect((await commit(p3, { 'x.md': 'x' }, { collection: pc3, visibility: 'private' }, patToken)).status).toBe(200)
+    expect((await getCol(pc3, samToken)).status).toBe(404)
+    expect((await json(`/_api/shares/${p3}`, { visibility: 'org' }, patToken)).status).toBe(200)
+    expect((await getCol(pc3, samToken)).body).toMatchObject({ slug: pc3, owner: PAT, shares: 1 })
+    expect(await listCols(pc3, samToken)).toEqual([pc3])
+    expect(await (await (await browser(SAM, ORIGIN))(`/?c=${pc3}`)).text()).toContain(`/${p3}/`)
+  })
+
+  it('an empty collection is readable by its owner only', async () => {
+    const empty = slug('pcol-empty')
+    expect((await api('PUT', `/_api/collections/${empty}`, { token: patToken, body: JSON.stringify({ title: 'Empty' }) })).status).toBe(200)
+    expect((await getCol(empty, patToken)).body).toMatchObject({ slug: empty, owner: PAT, shares: 0 })
+    expect(await listCols(empty, patToken)).toEqual([empty])
+    for (const token of [samToken, undefined]) {
+      expect((await getCol(empty, token)).status).toBe(404)
+      expect(await listCols(empty, token)).toEqual([])
+    }
+  })
+
+  it('an agent collection with org shares is readable by every member', async () => {
+    const mr = `metareview/${slug('pr')}`
+    const r = await json('/_api/tokens', { name: 'pcol-agent', scopes: ['write:metareview/*'] })
+    const agent = (await r.json<ServiceTokenCreated>()).token
+    const run = slug('pcol-run')
+    expect((await commit(run, { 'index.md': '# run' }, { collection: mr }, agent)).status).toBe(200)
+    for (const token of [samToken, patToken, undefined, agent]) {
+      expect((await getCol(mr, token)).body).toMatchObject({ slug: mr, shares: 1 })
+      expect(await listCols(mr, token)).toEqual([mr])
+    }
+    expect(await (await (await browser(SAM, ORIGIN))(`/?c=${mr}`)).text()).toContain(`/${run}/`)
   })
 })
 

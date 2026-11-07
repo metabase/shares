@@ -128,9 +128,15 @@ export interface ShareFilter {
 
 // Collections, share attributes and JSON reads. D1+R2 only.
 export interface QueryStore {
-  // Collection.shares counts the shares that viewer can read
+  // Collection.shares counts the shares that viewer can read. A
+  // collection without a live org or public share is private: it is
+  // left out (null) for every viewer but its owner and the owners of
+  // shares in it.
   collections(prefix: string, viewer: string | null): Promise<Collection[]>
   collection(slug: string, viewer: string | null): Promise<Collection | null>
+  // owner of the collection, without the read check; for write checks
+  // only, never shown to the writer
+  collectionOwner(slug: string): Promise<string | null>
   putCollection(slug: string, update: CollectionUpdate, by: string): Promise<Collection>
   // attributes of a share without a publish
   setAttrs(slug: string, attrs: ShareAttrs, by: string): Promise<void>

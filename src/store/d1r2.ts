@@ -110,11 +110,17 @@ interface CollectionRow {
 // `p` (null: anonymous). The JS form is canRead() in types.ts.
 const readableBy = (p: string) => `(s.visibility != 'private' OR s.owner = ${p})`
 
-// ?1: the viewer, for the share count
+// SQL condition: the collection c is readable by the viewer bound at
+// parameter `p`. A collection without a live org or public share is
+// private: only its owner and the owners of shares in it can read it.
+const collectionReadableBy = (p: string) => `(c.owner = ${p} OR EXISTS (SELECT 1 FROM shares s
+  WHERE s.collection = c.slug AND (s.owner = ${p} OR (s.current_version IS NOT NULL AND s.visibility != 'private'))))`
+
+// ?1: the viewer, for the share count and the read check
 const COLLECTION_SELECT = `SELECT c.slug, c.title, c.owner, c.meta, c.created_at, c.updated_at,
   (SELECT count(*) FROM shares s WHERE s.collection = c.slug AND s.current_version IS NOT NULL
     AND ${readableBy('?1')}) AS shares
-  FROM collections c`
+  FROM collections c WHERE ${collectionReadableBy('?1')}`
 
 // FTS5 query of the search box: each word is a prefix term, all must match
 export function searchQuery(q: string) {
@@ -527,14 +533,19 @@ export class D1R2Store implements ShareStore, QueryStore {
 
   async collections(prefix: string, viewer: string | null) {
     const { results } = await this.db.prepare(`${COLLECTION_SELECT}
-      WHERE substr(c.slug, 1, ?2) = ?3 ORDER BY c.updated_at DESC, c.slug`)
+      AND substr(c.slug, 1, ?2) = ?3 ORDER BY c.updated_at DESC, c.slug`)
       .bind(viewer, prefix.length, prefix).all<CollectionRow>()
     return results.map(collectionInfo)
   }
 
   async collection(slug: string, viewer: string | null) {
-    const r = await this.db.prepare(`${COLLECTION_SELECT} WHERE c.slug = ?2`).bind(viewer, slug).first<CollectionRow>()
+    const r = await this.db.prepare(`${COLLECTION_SELECT} AND c.slug = ?2`).bind(viewer, slug).first<CollectionRow>()
     return r ? collectionInfo(r) : null
+  }
+
+  async collectionOwner(slug: string) {
+    const r = await this.db.prepare('SELECT owner FROM collections WHERE slug = ?').bind(slug).first<{ owner: string }>()
+    return r?.owner ?? null
   }
 
   // Makes the collection (owner = by) or updates it; the caller checks the

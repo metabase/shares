@@ -117,6 +117,8 @@ async function dispatch(req: Request, url: URL, env: Env, store: ShareStore & Qu
     }
     if (req.method !== 'PUT') return error(405, 'method not allowed')
     if (!can('write', slug)) return outOfScope()
+    // a private collection that this token cannot read: refused without its owner
+    if (!await store.collection(slug, viewer) && await store.collectionOwner(slug)) return error(403, 'not your collection')
     return Response.json(await store.putCollection(slug, await body(req), who.email))
   }
 
