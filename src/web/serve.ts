@@ -7,7 +7,7 @@ import type { ShareInfo } from '../api-types'
 import { contentBase, hostKind } from '../origins'
 import { approvePage, tokenPage } from './tokens'
 import { collectionsPage, sharePage } from './manage'
-import { ICON, STYLE, copyLink, iconLink, nav, person, recency, when } from './shell'
+import { ICON, STYLE, copyLink, iconLink, nav, person, privateTag, recency, when } from './shell'
 import { uploadToken, uploadUi } from './upload'
 
 const summary = (s: ShareInfo): [string, ShareSummary] =>
@@ -61,7 +61,7 @@ export async function serve(url: URL, email: string | null, env: Env, store: Sha
     const rows = sorted.map(([p, s]) =>
       `<tr data-p="/${esc(p)}/"><td class="s"><a class="nm" href="${content}/${esc(p)}/">${
         s.title ? `<span class="ti">${esc(s.title)}</span>` : ''}<span class="slug">${esc(p)}</span></a>${
-        s.vis === 'public' ? '<span class="pub" title="opens without login">public</span>' : ''}</td>${
+        s.vis === 'public' ? '<span class="pub" title="opens without login">public</span>' : s.vis === 'private' ? privateTag : ''}</td>${
         owners ? `<td class="o">${person(s.o || env.ADMIN_EMAIL)}</td>` : ''
       }<td class="n">${s.n} file${
         s.n === 1 ? '' : 's'}</td>${viewCell(p)}<td class="t ${s.t ? recency(s.t) : 'old'}" title="${

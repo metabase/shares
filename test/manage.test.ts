@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it } from 'vitest'
 import { env } from 'cloudflare:workers'
 import { sha256Hex } from '../src/store/d1r2'
 import { lineDiff, hunks } from '../src/web/diff'
@@ -325,5 +325,102 @@ describe('web app', () => {
     const r = await fetchWorker('/_collections', {}, `https://${env.CONTENT_HOST}`)
     expect(r.status).toBe(302)
     expect(r.headers.get('location')).toBe(`https://${env.APP_HOST}/_collections`)
+  })
+})
+
+describe('share access', () => {
+  const flag = (on: boolean) => {
+    if (on) env.PUBLIC_SHARING = '1'
+    else delete env.PUBLIC_SHARING
+  }
+  afterEach(() => flag(false))
+  const vis = async (top: string) =>
+    (await env.DB.prepare('SELECT visibility FROM shares WHERE slug = ?').bind(top).first<{ visibility: string }>())!.visibility
+
+  it('gives the owner an Access form with "Only you" and "Anyone at Metabase", and the public option only with the flag', async () => {
+    const t = await userToken(OWNER)
+    const top = slug('ac')
+    await commit(top, { 'a.md': 'a' }, t)
+    const off = (await text(`/_s/${top}`)).body
+    expect(off).toMatch(/<dt>Access<\/dt><dd>Anyone at Metabase<\/dd>/)
+    expect(off).toContain('name="action" value="visibility"')
+    expect(off).toMatch(/value="private">Only you/)
+    expect(off).toMatch(/value="org" checked>Anyone at Metabase/)
+    expect(off).not.toContain('value="public"')
+    flag(true)
+    expect((await text(`/_s/${top}`)).body).toMatch(/value="public">Anyone with the link \(no login\)/)
+    flag(false)
+    expect((await submit(top, { action: 'visibility', visibility: 'public' })).status).toBe(403)
+    expect(await vis(top)).toBe('org')
+  })
+
+  it('makes a share private and back, with a private tag for the owner and not-found for others', async () => {
+    const t = await userToken(OWNER)
+    const top = slug('ap')
+    await commit(top, { 'a.md': 'a' }, t)
+    expect((await submit(top, { action: 'visibility', visibility: 'private' })).status).toBe(303)
+    expect(await vis(top)).toBe('private')
+    const own = (await text(`/_s/${top}`)).body
+    expect(own).toMatch(/<dt>Access<\/dt><dd>Only you<\/dd>/)
+    expect(own).toMatch(/<div class="ttl"><h1[^>]*>[^<]*<\/h1><span class="prv"/)
+    expect(own).toContain('you lose access to it')
+    expect((await text(`/_s/${top}`, OTHER)).status).toBe(404)
+    expect((await submit(top, { action: 'visibility', visibility: 'org' }, OTHER)).status).toBe(404)
+    expect((await submit(top, { action: 'visibility', visibility: 'bogus' })).status).toBe(400)
+    expect((await submit(top, { action: 'visibility', visibility: 'org' })).status).toBe(303)
+    expect(await vis(top)).toBe('org')
+    expect((await text(`/_s/${top}`, OTHER)).status).toBe(200)
+  })
+
+  it('shows another member no Access form', async () => {
+    const t = await userToken(OWNER)
+    const top = slug('ao')
+    await commit(top, { 'a.md': 'a' }, t)
+    const other = (await text(`/_s/${top}`, OTHER)).body
+    expect(other).toMatch(/<dt>Access<\/dt>/)
+    expect(other).not.toContain('value="visibility"')
+    expect((await submit(top, { action: 'visibility', visibility: 'private' }, OTHER)).status).toBe(403)
+  })
+
+  it('gives admin on another owner\'s public share only a "Make org-only" button, and refuses other values', async () => {
+    flag(true)
+    const t = await userToken(OWNER)
+    const top = slug('aa')
+    const org = slug('ab')
+    await commit(top, { 'a.md': 'a' }, t, { visibility: 'public' })
+    await commit(org, { 'a.md': 'a' }, t)
+    const adm = (await text(`/_s/${top}`, ADMIN)).body
+    expect(adm).toContain('Make org-only')
+    expect(adm).toContain('<input type="hidden" name="visibility" value="org">')
+    expect(adm).not.toContain('type="radio" name="visibility"')
+    expect((await text(`/_s/${org}`, ADMIN)).body).not.toContain('value="visibility"')
+    expect((await submit(top, { action: 'visibility', visibility: 'private' }, ADMIN)).status).toBe(403)
+    expect(await vis(top)).toBe('public')
+    expect((await submit(top, { action: 'visibility', visibility: 'org' }, ADMIN)).status).toBe(303)
+    expect(await vis(top)).toBe('org')
+  })
+
+  it('marks private shares in the list with a private badge, next to the public badge of public ones', async () => {
+    flag(true)
+    const t = await userToken(OWNER)
+    const priv = slug('lp')
+    const pub = slug('lq')
+    await commit(priv, { 'a.md': 'a' }, t, { visibility: 'private' })
+    await commit(pub, { 'a.md': 'a' }, t, { visibility: 'public' })
+    const list = (await text('/')).body
+    const row = (p: string) => list.match(new RegExp(`<tr data-p="/${p}/">.*?</tr>`, 's'))![0]
+    expect(row(priv)).toMatch(/<span class="prv"[^>]*><svg[^>]*>.*<\/svg>private<\/span>/s)
+    expect(row(priv)).not.toContain('class="pub"')
+    expect(row(pub)).toContain('<span class="pub"')
+    expect(row(pub)).not.toContain('class="prv"')
+  })
+
+  it('offers a Private checkbox on a new-share upload only', async () => {
+    const list = (await text('/')).body
+    expect(list).toMatch(/<input type="checkbox" name="private">Private/)
+    const t = await userToken(OWNER)
+    const top = slug('uv')
+    await commit(top, { 'a.md': 'a' }, t)
+    expect((await text(`/_s/${top}`)).body).not.toContain('name="private"')
   })
 })
