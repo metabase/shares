@@ -5,7 +5,11 @@
 // `Authorization: Bearer <token>`. A missing, bad, expired or revoked token
 // gives 401 "unauthorized". Bodies are text unless noted. Errors are
 // text with a trailing newline: 400 (reserved path, bad slug, empty
-// manifest), 403 ("owned by <email>"), 404 ("not found").
+// manifest), 403 ("owned by <email>"; "owned by another user" for a
+// private share of another owner), 404 ("not found").
+//
+// Private shares of other owners are never listed and never readable, also
+// not by admin: every read answers as for a slug that does not exist.
 
 // A share file path: "<slug>/<relative path>". Slugs never start with "_".
 export type FilePath = string
@@ -18,12 +22,14 @@ export interface ApiEndpoints {
   // install script of the TS `share` binary (`curl -fsSL <app>/install.sh | sh`).
   // /install.sh on the app host, /_install.sh on every host.
   'GET /_install.sh': { response: string }
-  // without prefix: slugs of your shares (admin: all), sorted.
+  // without prefix: slugs of your shares (admin: all but the private
+  // shares of others), sorted.
   // with ?prefix=<slug>/ or <slug>/<dir>/: full paths of the files under it.
   'GET /_list': { query: { prefix?: string }; response: Lines<string> }
   // Versioned publish: 1. ask which blobs the store lacks, 2. upload them,
   // 3. commit the manifest. The commit makes a new version live in one step;
   // until then readers see the previous version. 501 on the KV store.
+  // A visibility in the request applies in the same commit.
   // sha256 hex lines in, the ones not stored out
   'POST /_blobs/missing': { body: Lines<string>; response: Lines<string> }
   // one blob; 400 when the body's sha256 differs
@@ -38,8 +44,8 @@ export interface ApiEndpoints {
   // after the uploads: newline-separated relative paths of the share; 400
   // when one of them was not uploaded (the previous version stays live).
   // The query sets the share's attributes in the same commit: `collection`,
-  // `title`, and `meta=<key>=<value>` (repeatable; the value is a JSON
-  // string).
+  // `title`, `visibility`, and `meta=<key>=<value>` (repeatable; the value
+  // is a JSON string).
   'POST /_finalize/<slug>': { query: FinalizeQuery; body: Lines<string>; response: 'ok\n' }
   // raw bytes of one file
   'GET /<slug>/<path>': { response: ArrayBuffer }
@@ -75,9 +81,10 @@ export interface ApiEndpoints {
   // 400 with error authorization_pending (poll again), access_denied or
   // expired_token (start again); 200 with the token
   'POST /_device/token': { body: { device_code: string }; response: DeviceTokenResponse }
-  // make a share public (readable without login) or private. "on": owner
+  // legacy switch of the public visibility. "on": visibility public, owner
   // only, 403 "public sharing is disabled" when the server flag is off.
-  // "off": owner or admin. 404 when the slug does not exist; 501 on KV.
+  // "off": owner or admin; a public share becomes org, a private or org
+  // share stays as it is. 404 when the slug does not exist; 501 on KV.
   'POST /_public/<slug>': { body: 'on' | 'off'; response: 'on\n' | 'off\n' }
   // admin: newest audit rows (?limit=1..1000, default 100)
   'GET /_audit': { query: { limit?: number }; response: Lines<AuditLine> }
@@ -91,10 +98,13 @@ export interface ApiEndpoints {
   // create (owner = caller) or update (owner or admin)
   'PUT /_api/collections/<slug>': { body: CollectionUpdate; response: Collection }
   // shares with a live version, newest first. Without `collection`, a
-  // non-admin sees only their own shares.
+  // non-admin sees only their own shares. Private shares of others are
+  // never in the list.
   'GET /_api/shares': { query: ShareQuery; response: ShareInfo[] }
   'GET /_api/shares/<slug>': { response: ShareInfo }
-  // set attributes without a publish (owner or admin)
+  // set attributes without a publish (owner or admin). visibility: the
+  // owner sets any value (public only while PUBLIC_SHARING is on); admin
+  // only changes public to org.
   'POST /_api/shares/<slug>': { body: ShareAttrs; response: ShareInfo }
   // every version, newest first, pending ones too
   'GET /_api/shares/<slug>/versions': { response: VersionInfo[] }
@@ -174,6 +184,11 @@ export type DeviceTokenResponse =
 
 export type JsonValue = string | number | boolean | null | JsonValue[] | { [k: string]: JsonValue }
 
+// who can read a share. private: the owner only. org (the default): every
+// signed-in user. public: also anonymous readers, only while the server
+// flag PUBLIC_SHARING is on; with the flag off it reads as org.
+export type Visibility = 'private' | 'org' | 'public'
+
 // Free-form share attributes. Omitted fields stay as they are. A null
 // collection or title clears it; a null meta value removes that key. A
 // collection that does not exist is made, owned by the caller. Anyone can
@@ -182,6 +197,8 @@ export interface ShareAttrs {
   title?: string | null
   collection?: string | null
   meta?: Record<string, JsonValue>
+  // a service token sets private or org only
+  visibility?: Visibility
 }
 
 export interface PublishRequest extends ShareAttrs {
@@ -212,6 +229,7 @@ export interface ImportResponse {
 export interface FinalizeQuery {
   collection?: string
   title?: string
+  visibility?: Visibility
   meta?: string[] // "<key>=<value>"
 }
 
@@ -224,7 +242,7 @@ export interface Collection {
   title: string | null
   owner: string
   meta: Record<string, JsonValue>
-  shares: number // shares with a live version
+  shares: number // shares with a live version that the caller can read
   createdAt: number // ms since epoch
   updatedAt: number // last change or publish into it
 }
@@ -251,6 +269,7 @@ export interface ShareInfo {
   owner: string
   collection: string | null
   meta: Record<string, JsonValue>
+  visibility: Visibility
   version: number // the live version
   fileCount: number
   totalBytes: number
@@ -294,7 +313,8 @@ export interface ViewLine {
 }
 
 // one line of GET /_audit: tab-separated ISO time, actor email, action
-// (public.on, public.off), share slug
+// (visibility.private, visibility.org, visibility.public, share.rename,
+// ...), share slug
 export interface AuditLine {
   at: string
   actor: string

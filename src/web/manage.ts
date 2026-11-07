@@ -8,7 +8,7 @@ import type { Env } from '../env'
 import { esc, notFound, page } from '../render/page'
 import { ICON, STYLE, copyLink, iconLink, nav, person, when } from './shell'
 import { contentBase } from '../origins'
-import { isQueryStore, StoreError, type QueryStore, type ShareStore } from '../store'
+import { canRead, isQueryStore, StoreError, type QueryStore, type ShareStore } from '../store'
 import type { Collection, ShareInfo, VersionInfo } from '../api-types'
 import { asText, hunks, lineDiff } from './diff'
 import { uploadToken, uploadUi } from './upload'
@@ -24,6 +24,10 @@ const bytes = (n: number) =>
 
 const canManage = (share: ShareInfo, email: string, env: Env) => share.owner === email || email === env.ADMIN_EMAIL
 
+// the answer for a slug without a share, and for a share the reader may
+// not read: the two must be the same
+const noShare = () => message('Not found', 'No share with that slug.', 404)
+
 export function message(title: string, html: string, status: number) {
   const r = page(title, `${STYLE}<div class="app"><h1>${esc(title)}</h1><p class="sub">${html}</p></div>`, { poll: false })
   return new Response(r.body, { status, headers: r.headers })
@@ -33,7 +37,7 @@ export function message(title: string, html: string, status: number) {
 export async function sharePage(url: URL, env: Env, store: ShareStore, email: string, slug: string) {
   if (!isQueryStore(store)) return notFound()
   const share = await store.share(slug)
-  if (!share) return message('Not found', 'No share with that slug.', 404)
+  if (!share || !canRead(share, email)) return noShare()
   const versions = await store.versions(slug)
   const q = url.searchParams
   const self = `/_s/${encodeURIComponent(slug)}`
@@ -46,7 +50,7 @@ export async function sharePage(url: URL, env: Env, store: ShareStore, email: st
 
   const manage = canManage(share, email, env)
   const views = manage ? await store.views(slug) : null
-  const collections = manage ? await store.collections() : []
+  const collections = manage ? await store.collections('', email) : []
   const viewRows = Object.entries(views ?? {}).sort((a, b) => b[1].last - a[1].last)
     .map(([e, x]) => `<tr><td class="w">${person(e, true)}</td><td class="r">${x.n}</td><td>${when(x.last)}</td></tr>`)
 
@@ -281,7 +285,7 @@ export async function managePost(req: Request, url: URL, env: Env, store: ShareS
   if (!isQueryStore(store)) return notFound()
   const slug = decodeURIComponent(url.pathname.slice('/_s/'.length))
   const share = await store.share(slug)
-  if (!share) return message('Not found', 'No share with that slug.', 404)
+  if (!share || !canRead(share, email)) return noShare()
   if (!canManage(share, email, env)) return message('Forbidden', `Owned by ${esc(share.owner)}.`, 403)
   let form: FormData
   try { form = await req.formData() } catch { return new Response('bad form\n', { status: 400 }) }
@@ -327,7 +331,7 @@ export async function managePost(req: Request, url: URL, env: Env, store: ShareS
 // GET /_collections
 export async function collectionsPage(env: Env, store: ShareStore, email: string) {
   if (!isQueryStore(store)) return notFound()
-  const rows = (await store.collections()).map((c) => `<tr><td class="s"><a class="nm" href="/?c=${encodeURIComponent(c.slug)}">${
+  const rows = (await store.collections('', email)).map((c) => `<tr><td class="s"><a class="nm" href="/?c=${encodeURIComponent(c.slug)}">${
     c.title ? `<span class="ti">${esc(c.title)}</span>` : ''}<span class="slug">${esc(c.slug)}</span></a></td>
 <td class="o">${person(c.owner)}</td><td class="n">${c.shares}</td><td class="t">${when(c.updatedAt)}</td></tr>`)
   return page('Collections', `${STYLE}<div class="app">${nav(email, env, 'collections')}<div class="hd"><h1>Collections</h1></div>

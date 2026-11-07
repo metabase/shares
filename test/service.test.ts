@@ -144,3 +144,22 @@ describe('service tokens', () => {
     expect(mine.map((t) => t.name)).not.toContain('hidden')
   })
 })
+
+describe('metareview read-back', () => {
+  it('publishes runs into a metareview collection and reads them back by collection, versions and pinned path', async () => {
+    const { token } = await serviceToken({ name: 'metareview', scopes: ['write:metareview/*'] })
+    const col = `metareview/metabase-metabase/${slug('pr')}`
+    const top = slug('run')
+    for (const n of [1, 2]) {
+      const r = await commit(top, { 'index.html': `<h1>run ${n}</h1>` }, { collection: col, message: `run ${n}`, meta: { verdict: 'ok' } }, token)
+      expect(r.status).toBe(200)
+    }
+    for (const t of [token, undefined, await userToken('sam@metabase.com')]) {
+      const listed = await (await api('GET', `/_api/shares?collection=${col}&meta.verdict=ok`, { token: t })).json<ShareInfo[]>()
+      expect(listed.map((s) => [s.slug, s.visibility])).toEqual([[top, 'org']])
+      const versions = await (await api('GET', `/_api/shares/${top}/versions`, { token: t })).json<VersionInfo[]>()
+      expect(versions.map((v) => v.message)).toEqual(['run 2', 'run 1'])
+      expect(await (await api('GET', `/${top}@1/index.html`, { token: t })).text()).toBe('<h1>run 1</h1>')
+    }
+  })
+})
