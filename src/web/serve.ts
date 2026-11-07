@@ -4,15 +4,33 @@ import { ago, esc, notFound, page } from '../render/page'
 import { render } from '../render/files'
 import { canRead, isQueryStore, type ShareStore, type ShareSummary } from '../store'
 import type { Collection, ShareInfo } from '../api-types'
-import { contentBase, hostKind } from '../origins'
+import { appBase, contentBase, hostKind } from '../origins'
 import { approvePage, tokenPage } from './tokens'
 import { sharePage } from './manage'
-import { ICON, STYLE, copyLink, iconLink, nav, person, privateTag, recency, when } from './shell'
+import { ICON, STYLE, copyLink, nav, person, privateTag, recency, when } from './shell'
 import { uploadToken, uploadUi } from './upload'
+
+// entries of the hover preview
+const PEEK_FILES = 12
 
 const summary = (s: ShareInfo): [string, ShareSummary] =>
   [s.slug, { n: s.fileCount, t: s.updatedAt, o: s.owner, vis: s.visibility,
     ...(s.title ? { title: s.title } : {}), ...(s.collection ? { c: s.collection } : {}) }]
+
+// a share slug in the view of collection col, without the collection slug
+// at its start, word by word: collection "mr/repo/pr-1", slug
+// "mr-repo-pr-1-abc" gives "abc". The whole slug when the words of col are
+// not all at the start, or when nothing is left.
+export const shortSlug = (slug: string, col: string) => {
+  const low = slug.toLowerCase()
+  let i = 0
+  for (const w of col.toLowerCase().split(/[^a-z0-9]+/).filter(Boolean)) {
+    const m = low.startsWith(w, i) && /^[^a-z0-9]+/.exec(low.slice(i + w.length))
+    if (!m) return slug
+    i += w.length + m[0].length
+  }
+  return slug.slice(i) || slug
+}
 
 // ?q= on collection rows: every word of q is the start of a word of the
 // slug or the title, as the share search takes each word as a prefix
@@ -87,26 +105,27 @@ export async function serve(url: URL, email: string | null, env: Env, store: Sha
     }
     const timeCell = (t: number) => `<td class="t ${t ? recency(t) : 'old'}" title="${
       t ? new Date(t).toISOString() : 'published before timestamps existed'}">${ago(t)}</td>`
-    // the name cell; a share in a collection (outside the collection view)
-    // shows "collection / slug", the collection part links to its view
+    // a share opens as its folder view in the app; a store without that
+    // page (KV) links to the share on the content host
+    const open = (p: string) => query ? `/_s/${encodeURIComponent(p)}` : `${content}/${esc(p)}/`
+    // the name cell: the title, else the slug; the full slug is the hover
+    // title. Outside a collection view, a share in a collection shows the
+    // collection as a chip that links to its view.
     const nameCell = (p: string, s: ShareSummary) => {
-      const href = `${content}/${esc(p)}/`
-      const name = s.c && !c
-        ? `<div class="nm">${s.title ? `<a class="ti" href="${href}">${esc(s.title)}</a>` : ''}<span class="slug"><a class="cl" href="/?c=${
-          encodeURIComponent(s.c)}">${esc(s.c)}</a> / <a href="${href}">${esc(p)}</a></span></div>`
-        : `<a class="nm" href="${href}">${s.title ? `<span class="ti">${esc(s.title)}</span>` : ''}<span class="slug">${esc(p)}</span></a>`
-      return `<td class="s">${name}${
-        s.vis === 'public' ? '<span class="pub" title="opens without login">public</span>' : s.vis === 'private' ? privateTag : ''}</td>`
+      const label = s.title ? esc(s.title) : esc(c ? shortSlug(p, c) : p)
+      const chip = s.c && !c ? `<a class="cc" href="/?c=${encodeURIComponent(s.c)}" title="Collection ${esc(s.c)}">${esc(s.c)}</a>` : ''
+      return `<td class="s"><div class="nm"><a class="ti${s.title ? '' : ' sl'}" href="${open(p)}" title="${esc(p)}">${label}</a>${chip}${
+        s.vis === 'public' ? '<span class="pub" title="opens without login">public</span>' : s.vis === 'private' ? privateTag : ''}</div></td>`
     }
     const shareRow = ([p, s]: [string, ShareSummary]) =>
       `<tr data-p="/${esc(p)}/">${nameCell(p, s)}${
         owners ? `<td class="o">${person(s.o || env.ADMIN_EMAIL)}</td>` : ''
-      }<td class="n">${s.n} file${s.n === 1 ? '' : 's'}</td>${viewCell(p)}${timeCell(s.t)}<td class="acts">${copyLink(`${content}/${p}/`)}${
-        query ? ` ${iconLink(`/_s/${encodeURIComponent(p)}`, 'gear', 'Settings')}` : ''}</td></tr>`
+      }<td class="n"><a href="${open(p)}">${s.n} file${s.n === 1 ? '' : 's'}</a></td>${viewCell(p)}${timeCell(s.t)}<td class="acts">${
+        copyLink(`${content}/${p}/`)}</td></tr>`
     // a collection row has no peek (no data-p)
     const colRow = (k: Collection) =>
-      `<tr class="col"><td class="s"><a class="nm fd" href="/?c=${encodeURIComponent(k.slug)}">${ICON.folder}<span class="nmc">${
-        k.title ? `<span class="ti">${esc(k.title)}</span>` : ''}<span class="slug">${esc(k.slug)}</span></span></a></td>${
+      `<tr class="col"><td class="s"><a class="nm fd" href="/?c=${encodeURIComponent(k.slug)}" title="${esc(k.slug)}">${ICON.folder}<span class="ti${
+        k.title ? '' : ' sl'}">${esc(k.title || k.slug)}</span></a></td>${
         owners ? `<td class="o">${person(k.owner)}</td>` : ''
       }<td class="n">${k.shares} share${k.shares === 1 ? '' : 's'}</td><td class="v"></td>${timeCell(k.updatedAt)}<td class="acts"></td></tr>`
     // one list by updatedAt; a search keeps the share order (best match)
@@ -116,7 +135,7 @@ export async function serve(url: URL, email: string | null, env: Env, store: Sha
       ...sorted.map((r) => ({ t: q ? -1 : r[1].t, html: shareRow(r) })),
     ]
     const rows = (q ? items : items.sort((a, b) => b.t - a.t)).map((r) => r.html)
-    const head = `<thead><tr><th>Share</th>${owners ? '<th>Owner</th>' : ''}<th class="r">Files</th><th class="r">Viewers</th><th>Updated</th><th></th></tr></thead>`
+    const head = `<thead><tr><th>Share</th>${owners ? '<th>Owner</th>' : ''}<th class="r n">Files</th><th class="r v">Viewers</th><th>Updated</th><th></th></tr></thead>`
     // the scope toggle (admin) and the view filter keep each other and the search text
     const href = (o: { mine: boolean; cols: boolean }) => {
       const ps = [...(o.mine ? ['mine'] : []), ...(o.cols ? ['view=collections'] : []), ...(q ? [`q=${encodeURIComponent(q)}`] : [])]
@@ -143,14 +162,18 @@ export async function serve(url: URL, email: string | null, env: Env, store: Sha
   .hd .hdup{margin-left:auto}
   .hd .scope+.hdup,.hd .scope+.scope{margin-left:0}
   .chd{display:flex;flex-wrap:wrap;align-items:center;gap:.4rem .9rem}
-  .lst a.nm.fd{flex-direction:row;align-items:center;gap:.55rem;text-align:left}
+  .lst a.nm.fd{flex-direction:row;flex-wrap:nowrap;align-items:center;gap:.55rem}
   .lst .fd svg{flex:none;width:18px;height:18px;color:var(--muted)}
-  .lst .fd .nmc{display:flex;flex-direction:column;align-items:flex-start;min-width:0}
-  .lst .fd:hover .ti,.lst .fd:hover .slug:only-child{color:var(--link)}
-  .lst div.nm a{color:inherit;text-decoration:none}
-  .lst div.nm a:hover{color:var(--link)}
-  .lst .slug a.cl{color:var(--link)}
-  .lst .slug a.cl:hover{text-decoration:underline}
+  .lst .fd:hover .ti{color:var(--link)}
+  .lst div.nm a{text-decoration:none}
+  .lst a.ti:hover{color:var(--link)}
+  .lst .cc{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:.7rem;color:var(--muted);
+    border:1px solid var(--border);border-radius:5px;padding:0 .35em;overflow-wrap:anywhere;min-width:0}
+  .lst div.nm a.cc:hover{color:var(--link);border-color:var(--link)}
+  .lst td.n a{color:inherit;text-decoration:none}
+  /* phone: the name, owner, time and copy link fit without a side scroll */
+  @media (max-width:40rem){.lst .n,.lst .v{display:none}.app .lst td.s{min-width:0}}
+  .lst td.n a:hover{color:var(--link);text-decoration:underline}
   #q{width:100%;box-sizing:border-box;font:inherit;font-size:.9rem;padding:.5rem .75rem;
     background:var(--code-bg);color:var(--fg);border:1px solid var(--border);
     border-radius:6px;margin:0 0 .75rem}
@@ -183,7 +206,9 @@ ${q || c ? '<p><small><a href="/">All shares</a></small></p>' : ''}
 document.getElementById('q').addEventListener('input', function () {
   var q = this.value.toLowerCase()
   document.querySelectorAll('#shares tr').forEach(function (tr) {
-    tr.style.display = tr.textContent.toLowerCase().indexOf(q) === -1 ? 'none' : ''
+    var ti = tr.querySelector('.s [title]')
+    var t = tr.textContent + ' ' + (ti ? ti.getAttribute('title') : '')
+    tr.style.display = t.toLowerCase().indexOf(q) === -1 ? 'none' : ''
   })
 })
 var pv = document.createElement('div')
@@ -291,24 +316,18 @@ pvPump()
   const access = await store.access(key.split('/')[0])
   if (access && !canRead(access, email)) return notFound()
 
-  // /slug/_peek: first lines of the share's main file, for hover previews;
-  // ?full: all of its text, for the preview's copy button
+  // /slug/_peek: the file list of the share (what its folder view shows),
+  // for hover previews: the first entries; ?full: all of them, for the
+  // preview's copy button
   if (key.endsWith('/_peek')) {
     const prefix = key.slice(0, -'_peek'.length)
     const names = await store.filesUnder(prefix)
     if (!names.length) return notFound()
-    const pick = names.find((n) => n.endsWith('/index.md')) || names[0]
-    const buf = await store.getBytes(pick)
-    let text
-    if (buf && !new Uint8Array(buf, 0, Math.min(4096, buf.byteLength)).includes(0)) {
-      text = url.searchParams.has('full')
-        ? new TextDecoder().decode(buf)
-        : new TextDecoder().decode(buf.slice(0, 8192)).split('\n').slice(0, 10)
-          .map((l) => (l.length > 160 ? l.slice(0, 160) + '…' : l)).join('\n')
-    } else {
-      text = names.map((n) => n.slice(prefix.length)).slice(0, 10).join('\n')
-    }
-    return new Response(JSON.stringify({ file: pick.slice(prefix.length), text }), {
+    const paths = names.map((n) => n.slice(prefix.length))
+    const more = paths.length - PEEK_FILES
+    const text = url.searchParams.has('full') || more <= 0 ? paths.join('\n')
+      : `${paths.slice(0, PEEK_FILES).join('\n')}\n… ${more} more`
+    return new Response(JSON.stringify({ file: `${paths.length} file${paths.length === 1 ? '' : 's'}`, text }), {
       headers: { 'content-type': 'application/json', 'cache-control': 'private, no-cache' },
     })
   }
@@ -344,8 +363,11 @@ pvPump()
     const items = names.map(
       (n) => `<li><a href="/${esc(n)}">${esc(n.slice(key.length))}</a></li>`,
     )
+    const top = key.split('/')[0]
+    const app = isQueryStore(store) && !env.PUBLIC
+      ? ` · <a href="${appBase(url, env)}/_s/${encodeURIComponent(top)}">open in shares</a>` : ''
     return page(key, `<h1>${esc(key.replace(/\/$/, ''))}</h1><ul>${items.join('')}</ul>
-<p><a href="/${esc(key)}_zip">download all (.zip)</a></p>`, { slug: !env.PUBLIC && key.split('/')[0] })
+<p><a href="/${esc(key)}_zip">download all (.zip)</a>${app}</p>`, { slug: !env.PUBLIC && key.split('/')[0] })
   }
 
   const hit = await render(key, env, store, accept)

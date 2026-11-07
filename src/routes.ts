@@ -81,6 +81,15 @@ function isNavigation(req: Request) {
   return !(mode && mode !== 'navigate') && !(dest && dest !== 'document')
 }
 
+// A frame navigation that a same-site page started (the redirect from the
+// content host keeps sec-fetch-site same-site). The answer is a redirect
+// only: the frame never shows an app-host document.
+function isFrameLogin(req: Request) {
+  const site = req.headers.get('sec-fetch-site')
+  return req.headers.get('sec-fetch-mode') === 'navigate' && req.headers.get('sec-fetch-dest') === 'iframe'
+    && (site === 'same-origin' || site === 'same-site')
+}
+
 function lockDown(res: Response) {
   // Response.redirect() has immutable headers
   const out = new Response(res.body, res)
@@ -91,11 +100,12 @@ function lockDown(res: Response) {
 }
 
 // views: count successful browser navigations to share content. Assets
-// and hover previews fetch() with accept */*; _peek/_zip carry a /_ path.
+// and hover previews fetch() with accept */*; _peek/_zip carry a /_ path;
+// the index frame of the share page is not a view.
 function recordView(ctx: ExecutionContext, store: ShareStore, key: string, email: string | null,
-  res: Response, accept: string | null) {
+  res: Response, req: Request) {
   if (email && res.status === 200 && key && !key.startsWith('_') && !key.includes('/_')
-      && accept?.includes('text/html')) {
+      && req.headers.get('accept')?.includes('text/html') && req.headers.get('sec-fetch-dest') !== 'iframe') {
     ctx.waitUntil(store.recordView(baseSlug(key.split('/')[0]), email))
   }
 }
@@ -142,7 +152,7 @@ export async function handle(req: Request, env: Env, ctx: ExecutionContext): Pro
 
   const accept = req.headers.get('accept')
   const res = await serve(url, email, env, store, accept)
-  recordView(ctx, store, key, email, res, accept)
+  recordView(ctx, store, key, email, res, req)
   return priv ? lockDown(res) : res
 }
 
@@ -171,7 +181,7 @@ export async function contentHost(req: Request, env: Env, ctx: ExecutionContext)
 
   const accept = req.headers.get('accept')
   const res = await serve(url, email, env, store, accept)
-  recordView(ctx, store, key, email, res, accept)
+  recordView(ctx, store, key, email, res, req)
   return res
 }
 
@@ -226,9 +236,13 @@ async function appRoutes(req: Request, env: Env): Promise<Response> {
   }
   if (env.PUBLIC) return notFound()
 
-  // _peek feeds the hover previews of the listing page, a same-origin fetch
+  // _peek feeds the hover previews of the listing page, a same-origin fetch.
+  // _login also answers in a frame of a same-site page: the index frame of
+  // the share page logs in to the content host on its first load.
   const site = req.headers.get('sec-fetch-site')
-  if (peek ? site && site !== 'same-origin' : !isNavigation(req)) return forbidden()
+  if (peek ? site && site !== 'same-origin'
+    : key === '_login' ? !isNavigation(req) && !isFrameLogin(req)
+      : !isNavigation(req)) return forbidden()
 
   const email = await sessionEmail(req, env, COOKIE.app)
   if (!email) return redirectToGoogle(url, env)

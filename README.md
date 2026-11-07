@@ -70,7 +70,7 @@ bun run test                      # tsc (worker, cli) + worker tests + CLI unit 
 
 Local data for UI work, with `bun run dev` running:
 
-1. `bun run dev:seed`: 36 shares of 4 owners and 5 collections (every renderer, versions,
+1. `bun run dev:seed`: 39 shares of 4 owners and 6 collections (every renderer, versions,
    collections, 5 private shares, one private collection). Run it again: unchanged shares are
    skipped.
 2. Open http://localhost:8787/_dev/login: you sign in as `ADMIN_EMAIL` (set it in `.dev.vars`
