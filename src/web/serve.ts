@@ -3,15 +3,27 @@ import type { Env } from '../env'
 import { ago, esc, notFound, page } from '../render/page'
 import { render } from '../render/files'
 import { canRead, isQueryStore, type ShareStore, type ShareSummary } from '../store'
-import type { ShareInfo } from '../api-types'
+import type { Collection, ShareInfo } from '../api-types'
 import { contentBase, hostKind } from '../origins'
 import { approvePage, tokenPage } from './tokens'
-import { collectionsPage, sharePage } from './manage'
+import { sharePage } from './manage'
 import { ICON, STYLE, copyLink, iconLink, nav, person, privateTag, recency, when } from './shell'
 import { uploadToken, uploadUi } from './upload'
 
 const summary = (s: ShareInfo): [string, ShareSummary] =>
-  [s.slug, { n: s.fileCount, t: s.updatedAt, o: s.owner, vis: s.visibility, ...(s.title ? { title: s.title } : {}) }]
+  [s.slug, { n: s.fileCount, t: s.updatedAt, o: s.owner, vis: s.visibility,
+    ...(s.title ? { title: s.title } : {}), ...(s.collection ? { c: s.collection } : {}) }]
+
+// ?q= on collection rows: every word of q is the start of a word of the
+// slug or the title, as the share search takes each word as a prefix
+const words = (s: string) => s.toLowerCase().split(/[^\p{L}\p{N}]+/u).filter(Boolean)
+const colMatch = (q: string) => {
+  const qs = words(q)
+  return (k: Collection) => {
+    const ws = words(`${k.slug} ${k.title ?? ''}`)
+    return qs.every((w) => ws.some((x) => x.startsWith(w)))
+  }
+}
 
 export async function serve(url: URL, email: string | null, env: Env, store: ShareStore, accept: string | null): Promise<Response> {
   const key = decodeURIComponent(url.pathname.slice(1))
@@ -29,15 +41,21 @@ export async function serve(url: URL, email: string | null, env: Env, store: Sha
     const isAdmin = email === env.ADMIN_EMAIL
     const admin = isAdmin && !url.searchParams.has('mine')
     // ?q=: full text search (D1+R2), best match first; ?c=: the shares of
-    // a collection that the viewer can read (as the JSON API)
+    // a collection that the viewer can read (as the JSON API);
+    // ?view=collections: collection rows only
     const q = url.searchParams.get('q')?.trim() || ''
     const c = url.searchParams.get('c') || ''
     const query = isQueryStore(store) ? store : null
-    let sorted: [string, ShareSummary][]
+    const onlyCols = !!query && !c && url.searchParams.get('view') === 'collections'
+    let sorted: [string, ShareSummary][] = []
+    let col: Collection | null = null
     if (query && c) {
       // a private collection of others answers as a missing one
-      if (!await query.collection(c, email)) return notFound()
+      col = await query.collection(c, email)
+      if (!col) return notFound()
       sorted = (await query.queryShares({ collection: c, viewer: email, limit: 1000 })).map(summary)
+    } else if (onlyCols) {
+      // no share rows
     } else if (query && q) {
       sorted = (await query.search(q, admin ? undefined : email!, email, 200)).map(summary)
     } else {
@@ -47,6 +65,13 @@ export async function serve(url: URL, email: string | null, env: Env, store: Sha
         .filter(([, s]) => (s.o || env.ADMIN_EMAIL) === email || (admin && s.vis !== 'private'))
       // newest first; pre-timestamp shares (no metadata) sink to the bottom
       sorted = mine.sort((a, b) => b[1].t - a[1].t || a[0].localeCompare(b[0]))
+    }
+    // collection rows: yours (owned, or holding a share of yours); admin in
+    // Everyone: every collection the admin can read
+    let cols: Collection[] = []
+    if (query && !c) {
+      cols = admin ? await query.collections('', email) : await query.collectionsFor(email!)
+      if (q) cols = cols.filter(colMatch(q))
     }
     const owners = admin || !!c
     // view logs, one get per row (reads are 100k/day; lists are the scarce thing)
@@ -60,28 +85,72 @@ export async function serve(url: URL, email: string | null, env: Env, store: Sha
       const n = Object.keys(v).length
       return `<td class="v" title="${esc(who)}">${n} viewer${n === 1 ? '' : 's'}</td>`
     }
-    const rows = sorted.map(([p, s]) =>
-      `<tr data-p="/${esc(p)}/"><td class="s"><a class="nm" href="${content}/${esc(p)}/">${
-        s.title ? `<span class="ti">${esc(s.title)}</span>` : ''}<span class="slug">${esc(p)}</span></a>${
-        s.vis === 'public' ? '<span class="pub" title="opens without login">public</span>' : s.vis === 'private' ? privateTag : ''}</td>${
+    const timeCell = (t: number) => `<td class="t ${t ? recency(t) : 'old'}" title="${
+      t ? new Date(t).toISOString() : 'published before timestamps existed'}">${ago(t)}</td>`
+    // the name cell; a share in a collection (outside the collection view)
+    // shows "collection / slug", the collection part links to its view
+    const nameCell = (p: string, s: ShareSummary) => {
+      const href = `${content}/${esc(p)}/`
+      const name = s.c && !c
+        ? `<div class="nm">${s.title ? `<a class="ti" href="${href}">${esc(s.title)}</a>` : ''}<span class="slug"><a class="cl" href="/?c=${
+          encodeURIComponent(s.c)}">${esc(s.c)}</a> / <a href="${href}">${esc(p)}</a></span></div>`
+        : `<a class="nm" href="${href}">${s.title ? `<span class="ti">${esc(s.title)}</span>` : ''}<span class="slug">${esc(p)}</span></a>`
+      return `<td class="s">${name}${
+        s.vis === 'public' ? '<span class="pub" title="opens without login">public</span>' : s.vis === 'private' ? privateTag : ''}</td>`
+    }
+    const shareRow = ([p, s]: [string, ShareSummary]) =>
+      `<tr data-p="/${esc(p)}/">${nameCell(p, s)}${
         owners ? `<td class="o">${person(s.o || env.ADMIN_EMAIL)}</td>` : ''
-      }<td class="n">${s.n} file${
-        s.n === 1 ? '' : 's'}</td>${viewCell(p)}<td class="t ${s.t ? recency(s.t) : 'old'}" title="${
-        s.t ? new Date(s.t).toISOString() : 'published before timestamps existed'}">${
-        ago(s.t)}</td><td class="acts">${copyLink(`${content}/${p}/`)}${
-        query ? ` ${iconLink(`/_s/${encodeURIComponent(p)}`, 'gear', 'Settings')}` : ''}</td></tr>`)
+      }<td class="n">${s.n} file${s.n === 1 ? '' : 's'}</td>${viewCell(p)}${timeCell(s.t)}<td class="acts">${copyLink(`${content}/${p}/`)}${
+        query ? ` ${iconLink(`/_s/${encodeURIComponent(p)}`, 'gear', 'Settings')}` : ''}</td></tr>`
+    // a collection row has no peek (no data-p)
+    const colRow = (k: Collection) =>
+      `<tr class="col"><td class="s"><a class="nm fd" href="/?c=${encodeURIComponent(k.slug)}">${ICON.folder}<span class="nmc">${
+        k.title ? `<span class="ti">${esc(k.title)}</span>` : ''}<span class="slug">${esc(k.slug)}</span></span></a></td>${
+        owners ? `<td class="o">${person(k.owner)}</td>` : ''
+      }<td class="n">${k.shares} share${k.shares === 1 ? '' : 's'}</td><td class="v"></td>${timeCell(k.updatedAt)}<td class="acts"></td></tr>`
+    // one list by updatedAt; a search keeps the share order (best match)
+    // after the matching collections
+    const items: { t: number; html: string }[] = [
+      ...cols.map((k) => ({ t: k.updatedAt, html: colRow(k) })),
+      ...sorted.map((r) => ({ t: q ? -1 : r[1].t, html: shareRow(r) })),
+    ]
+    const rows = (q ? items : items.sort((a, b) => b.t - a.t)).map((r) => r.html)
     const head = `<thead><tr><th>Share</th>${owners ? '<th>Owner</th>' : ''}<th class="r">Files</th><th class="r">Viewers</th><th>Updated</th><th></th></tr></thead>`
-    // admin scope toggle; the search text stays across the switch
-    const qs = q ? `q=${encodeURIComponent(q)}` : ''
+    // the scope toggle (admin) and the view filter keep each other and the search text
+    const href = (o: { mine: boolean; cols: boolean }) => {
+      const ps = [...(o.mine ? ['mine'] : []), ...(o.cols ? ['view=collections'] : []), ...(q ? [`q=${encodeURIComponent(q)}`] : [])]
+      return `/${ps.length ? `?${ps.join('&')}` : ''}`
+    }
+    const seg = (label: string, on: boolean, h: string) =>
+      `<a href="${h}"${on ? ' class="on" aria-current="true"' : ''}>${label}</a>`
     const scope = isAdmin && !c
-      ? `<div class="scope" role="group" aria-label="Scope"><a href="/?mine${qs ? `&${qs}` : ''}"${admin ? '' : ' class="on" aria-current="true"'}>Mine</a><a href="/${qs ? `?${qs}` : ''}"${admin ? ' class="on" aria-current="true"' : ''}>Everyone</a></div>`
+      ? `<div class="scope" role="group" aria-label="Scope">${seg('Mine', !admin, href({ mine: true, cols: onlyCols }))}${
+        seg('Everyone', admin, href({ mine: false, cols: onlyCols }))}</div>`
+      : ''
+    const filter = query && !c
+      ? `<div class="scope" role="group" aria-label="Show">${seg('All', !onlyCols, href({ mine: isAdmin && !admin, cols: false }))}${
+        seg('Collections', onlyCols, href({ mine: isAdmin && !admin, cols: true }))}</div>`
       : ''
     // new share by upload; in a collection view it lands in that collection
     const up = query?.commit ? `<span class="hdup">${uploadUi({ token: await uploadToken(env, email!), mode: 'new', collection: c || undefined })}</span>` : ''
-    const title = c ? `Collection <code>${esc(c)}</code>` : q ? 'Search' : admin ? 'Shares' : 'My shares'
+    const title = col ? (col.title ? esc(col.title) : `Collection <code>${esc(c)}</code>`) : q ? 'Search' : admin ? 'Shares' : 'My shares'
+    const colHead = col ? `<p class="sub chd"><span class="mono">${esc(col.slug)}</span>${person(col.owner)}<span>${
+      col.shares} share${col.shares === 1 ? '' : 's'}</span>${Object.entries(col.meta).map(([k, v]) =>
+      `<span class="tag">${esc(k)}: ${esc(typeof v === 'string' ? v : JSON.stringify(v))}</span>`).join('')}</p>` : ''
+    const empty = q || c ? 'No match.' : onlyCols ? 'No collections yet.' : 'No shares yet.'
     return page(c ? 'Collection' : q ? 'Search' : admin ? 'Shares' : 'My shares', `<style>
   .hd .hdup{margin-left:auto}
-  .hd .scope+.hdup{margin-left:0}
+  .hd .scope+.hdup,.hd .scope+.scope{margin-left:0}
+  .chd{display:flex;flex-wrap:wrap;align-items:center;gap:.4rem .9rem}
+  .lst a.nm.fd{flex-direction:row;align-items:center;gap:.55rem;text-align:left}
+  .lst .fd svg{flex:none;width:18px;height:18px;color:var(--muted)}
+  .lst .fd .nmc{display:flex;flex-direction:column;align-items:flex-start;min-width:0}
+  .lst .fd:hover .ti,.lst .fd:hover .slug:only-child{color:var(--link)}
+  .lst div.nm a{color:inherit;text-decoration:none}
+  .lst div.nm a:hover{color:var(--link)}
+  .lst .slug a.cl{color:var(--link)}
+  .lst .slug a.cl:hover{text-decoration:underline}
   #q{width:100%;box-sizing:border-box;font:inherit;font-size:.9rem;padding:.5rem .75rem;
     background:var(--code-bg);color:var(--fg);border:1px solid var(--border);
     border-radius:6px;margin:0 0 .75rem}
@@ -103,10 +172,11 @@ export async function serve(url: URL, email: string | null, env: Env, store: Sha
     max-width:none;font-size:.75rem;line-height:1.4;white-space:pre-wrap;overflow:hidden}
 </style>
 ${STYLE}<div class="app">${nav(email!, env, 'shares')}
-<div class="hd"><h1>${title}</h1>${scope}${up}</div>
-<form method="get" action="/">${admin ? '' : isAdmin ? '<input type="hidden" name="mine" value="">' : ''}
+<div class="hd"><h1>${title}</h1>${filter}${scope}${up}</div>${colHead}
+<form method="get" action="/">${admin ? '' : isAdmin ? '<input type="hidden" name="mine" value="">' : ''}${
+  onlyCols ? '<input type="hidden" name="view" value="collections">' : ''}
 <input id="q" name="q" value="${esc(q)}" placeholder="Search shares" aria-label="Search shares" autofocus></form>
-${rows.length ? `<div class="scroll"><table class="lst">${head}<tbody id="shares">${rows.join('')}</tbody></table></div>` : `<p class="sub">${q || c ? 'No match.' : 'No shares yet.'}</p>`}
+${rows.length ? `<div class="scroll"><table class="lst">${head}<tbody id="shares">${rows.join('')}</tbody></table></div>` : `<p class="sub">${empty}</p>`}
 ${q || c ? '<p><small><a href="/">All shares</a></small></p>' : ''}
 </div>
 <script>
@@ -177,7 +247,7 @@ function pvPump() {
   }
 }
 pvPump()
-</script>`, { vsrc: JSON.stringify(sorted), poll: false })
+</script>`, { vsrc: JSON.stringify([sorted, cols]), poll: false })
   }
 
   // /_stats (admin): shares + files per owner from the cached _man/ list,
@@ -208,7 +278,8 @@ pvPump()
   if (key === '_token') return tokenPage(url, env, email!)
   if (key === '_device' || (key === 'cli' && hostKind(url, env) === 'app')) return approvePage(url, env, email!)
 
-  if (key === '_collections') return collectionsPage(env, store, email!)
+  // the collections page of old: the list's Collections filter
+  if (key === '_collections') return Response.redirect(`${url.origin}/?view=collections`, 302)
   if (key.startsWith('_s/')) return sharePage(url, env, store, email!, key.slice('_s/'.length))
 
   // reserved namespace: /_own/... must not render or list (slug enumeration)

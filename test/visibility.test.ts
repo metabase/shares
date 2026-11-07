@@ -236,7 +236,7 @@ describe('private collections', () => {
       expect(await getCol(pc, token)).toEqual(await getCol(nocol, token))
       expect((await getCol(pc, token)).status).toBe(404)
       expect(await listCols(pc, token)).toEqual([])
-      expect(await (await b('/_collections')).text()).not.toContain(pc)
+      expect(await (await b('/?view=collections')).text()).not.toContain(pc)
     }
   })
 

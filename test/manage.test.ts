@@ -65,10 +65,11 @@ describe('line diff', () => {
 })
 
 describe('app nav', () => {
-  it('marks the current page and shows Activity to the admin only', async () => {
-    const member = (await text('/_collections', OTHER)).body
-    expect(member).toContain('<a href="/_collections" class="on" aria-current="page">Collections</a>')
-    expect(member).toContain('<a href="/_token">Install</a>')
+  it('marks the current page, has no Collections item and shows Activity to the admin only', async () => {
+    const member = (await text('/_token', OTHER)).body
+    expect(member).toContain('<a href="/_token" class="on" aria-current="page">Install</a>')
+    expect(member).toContain('<a href="/">Shares</a>')
+    expect(member).not.toContain('Collections</a>')
     expect(member).not.toContain('Activity')
     expect(member).toContain('<select data-thm')
     const admin = (await text('/_stats', ADMIN)).body
@@ -79,7 +80,7 @@ describe('app nav', () => {
   it('titles the list "My shares" for a member and gives the admin a Mine / Everyone toggle that keeps the search', async () => {
     const member = (await text('/', OTHER)).body
     expect(member).toContain('<h1>My shares</h1>')
-    expect(member).not.toContain('class="scope"')
+    expect(member).not.toContain('aria-label="Scope"')
     const every = (await text('/?q=zebra', ADMIN)).body
     expect(every).toContain('<a href="/?mine&q=zebra">Mine</a><a href="/?q=zebra" class="on" aria-current="true">Everyone</a>')
     const mine = (await text('/?mine', ADMIN)).body
@@ -100,15 +101,83 @@ describe('web app', () => {
     expect((await text('/?q=zebra', ADMIN)).body).toContain(top)
   })
 
-  it('lists the shares of a collection and the collections', async () => {
+  it('sends /_collections to the Collections filter of the list', async () => {
+    const r = await browse('/_collections', OTHER)
+    expect(r.status).toBe(302)
+    expect(new URL(r.headers.get('location')!).search).toBe('?view=collections')
+  })
+
+  it('lists your collections and a collection of another user that holds your share, not others\' collections', async () => {
+    const [t, o] = [await userToken(OWNER), await userToken(OTHER)]
+    const own = `mine/${slug('c')}`, theirs = `theirs/${slug('c')}`, other = `other/${slug('c')}`
+    const [a, b, c, d] = [slug('ca'), slug('cb'), slug('cc'), slug('cd')]
+    await commit(a, { 'a.md': 'a' }, t, { collection: own })
+    await commit(b, { 'a.md': 'b' }, o, { collection: theirs })
+    await commit(c, { 'a.md': 'c' }, t, { collection: theirs })
+    await commit(d, { 'a.md': 'd' }, o, { collection: other })
+    const body = (await text('/')).body
+    const row = (k: string) => `<tr class="col"><td class="s"><a class="nm fd" href="/?c=${encodeURIComponent(k)}">`
+    expect(body).toContain(row(own))
+    expect(body).toContain(row(theirs))
+    expect(body).not.toContain(encodeURIComponent(other))
+    expect(body).toMatch(new RegExp(`${encodeURIComponent(theirs)}">.*?<td class="n">2 shares</td>`))
+    expect(body).toContain(`<a class="cl" href="/?c=${encodeURIComponent(theirs)}">${theirs}</a> / <a href=`)
+    expect(body).toContain(`>${c}</a></span>`)
+    // one list by update time: the newest collection row comes before the older share row
+    expect(body.indexOf(row(theirs))).toBeLessThan(body.indexOf(`data-p="/${a}/"`))
+  })
+
+  it('shows only collection rows with view=collections, and the filter keeps the search and the admin scope', async () => {
     const t = await userToken(OWNER)
-    const col = `team/${slug('col')}`
-    const top = slug('incol')
+    const col = `vw/${slug('c')}`, top = slug('vw')
     await commit(top, { 'a.md': 'a' }, t, { collection: col })
-    expect((await text(`/?c=${encodeURIComponent(col)}`, OTHER)).body).toContain(top)
-    const cols = await text('/_collections', OTHER)
-    expect(cols.status).toBe(200)
-    expect(cols.body).toContain(`/?c=${encodeURIComponent(col)}`)
+    const body = (await text('/?view=collections')).body
+    expect(body).toContain(`href="/?c=${encodeURIComponent(col)}"`)
+    expect(body).not.toContain(`data-p="/${top}/"`)
+    expect(body).toContain('<a href="/">All</a><a href="/?view=collections" class="on" aria-current="true">Collections</a>')
+    expect(body).toContain('<input type="hidden" name="view" value="collections">')
+    expect((await text('/?q=zz', OWNER)).body).toContain('<a href="/?q=zz" class="on" aria-current="true">All</a><a href="/?view=collections&q=zz">Collections</a>')
+    const admin = (await text('/?mine&view=collections', ADMIN)).body
+    expect(admin).toContain('<a href="/?mine&view=collections" class="on" aria-current="true">Mine</a><a href="/?view=collections">Everyone</a>')
+    expect(admin).toContain('<a href="/?mine">All</a>')
+  })
+
+  it('matches a collection title or slug word with q', async () => {
+    const t = await userToken(OWNER)
+    const col = `qc/${slug('c')}`
+    await commit(slug('qc'), { 'a.md': 'a' }, t, { collection: col })
+    expect((await api('PUT', `/_api/collections/${col}`, { token: t, body: JSON.stringify({ title: 'Pangolin reports' }) })).status).toBe(200)
+    const row = `<a class="nm fd" href="/?c=${encodeURIComponent(col)}">`
+    expect((await text('/?q=pangol')).body).toContain(row)
+    expect((await text(`/?q=${col.split('/')[1]}&view=collections`)).body).toContain(row)
+    expect((await text('/?q=narwhalzz')).body).not.toContain(row)
+  })
+
+  it('shows a collection of another user with its header and their org shares, not their private ones', async () => {
+    const o = await userToken(OTHER)
+    const col = `hd/${slug('c')}`, pub = slug('hdo'), priv = slug('hdp')
+    await commit(pub, { 'a.md': 'a' }, o, { collection: col })
+    await commit(priv, { 'a.md': 'p' }, o, { collection: col, visibility: 'private' })
+    expect((await api('PUT', `/_api/collections/${col}`, { token: o, body: JSON.stringify({ title: 'Heron notes', meta: { pr: 7 } }) })).status).toBe(200)
+    const body = (await text(`/?c=${encodeURIComponent(col)}`)).body
+    expect(body).toContain('<h1>Heron notes</h1>')
+    expect(body).toContain(`<span class="mono">${col}</span>`)
+    expect(body).toContain('<span>1 share</span><span class="tag">pr: 7</span>')
+    expect(body).toContain('other</span>')
+    expect(body).toContain(`data-p="/${pub}/"`)
+    expect(body).not.toContain(priv)
+    expect((await text(`/?c=${encodeURIComponent(col)}`, OTHER)).body).toContain(`data-p="/${priv}/"`)
+  })
+
+  it('gives the admin every readable collection in Everyone and only own ones in Mine', async () => {
+    const o = await userToken(OTHER)
+    const col = `ad/${slug('c')}`
+    await commit(slug('ad'), { 'a.md': 'a' }, o, { collection: col })
+    const row = `<a class="nm fd" href="/?c=${encodeURIComponent(col)}">`
+    const every = (await text('/', ADMIN)).body
+    expect(every).toContain(row)
+    expect(every).toMatch(new RegExp(`${encodeURIComponent(col)}">.*?<td class="o">`))
+    expect((await text('/?mine', ADMIN)).body).not.toContain(row)
   })
 
   it('shows versions, the files of an old version as escaped text, and a diff', async () => {

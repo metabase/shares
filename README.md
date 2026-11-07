@@ -70,8 +70,9 @@ bun run test                      # tsc (worker, cli) + worker tests + CLI unit 
 
 Local data for UI work, with `bun run dev` running:
 
-1. `bun run dev:seed`: 34 shares of 4 owners (every renderer, versions, collections). Run it
-   again: unchanged shares are skipped.
+1. `bun run dev:seed`: 36 shares of 4 owners and 5 collections (every renderer, versions,
+   collections, 5 private shares, one private collection). Run it again: unchanged shares are
+   skipped.
 2. Open http://localhost:8787/_dev/login: you sign in as `ADMIN_EMAIL` (set it in `.dev.vars`
    for the admin view). `/_dev/login?email=sam.chen@metabase.com` signs in as another user,
    for the non-admin view. The session cookie is shared by every port on `localhost`: for a

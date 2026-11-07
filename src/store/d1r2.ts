@@ -460,11 +460,12 @@ export class D1R2Store implements ShareStore, QueryStore {
   }
 
   async shares() {
-    const { results } = await this.db.prepare(`SELECT s.slug, s.owner, s.title, s.updated_at, s.visibility, v.file_count FROM shares s
+    const { results } = await this.db.prepare(`SELECT s.slug, s.owner, s.title, s.collection, s.updated_at, s.visibility, v.file_count FROM shares s
       JOIN versions v ON v.share = s.slug AND v.version = s.current_version`)
-      .all<{ slug: string; owner: string; title: string | null; updated_at: number; visibility: Visibility; file_count: number }>()
+      .all<{ slug: string; owner: string; title: string | null; collection: string | null; updated_at: number; visibility: Visibility; file_count: number }>()
     return new Map<string, ShareSummary>(results.map((r) =>
-      [r.slug, { n: r.file_count, t: r.updated_at, o: r.owner, vis: r.visibility, ...(r.title ? { title: r.title } : {}) }]))
+      [r.slug, { n: r.file_count, t: r.updated_at, o: r.owner, vis: r.visibility,
+        ...(r.title ? { title: r.title } : {}), ...(r.collection ? { c: r.collection } : {}) }]))
   }
 
   // Removes the share and (cascade) its versions, files, views and metadata,
@@ -541,6 +542,14 @@ export class D1R2Store implements ShareStore, QueryStore {
   async collection(slug: string, viewer: string | null) {
     const r = await this.db.prepare(`${COLLECTION_SELECT} AND c.slug = ?2`).bind(viewer, slug).first<CollectionRow>()
     return r ? collectionInfo(r) : null
+  }
+
+  async collectionsFor(viewer: string) {
+    const { results } = await this.db.prepare(`${COLLECTION_SELECT}
+      AND (c.owner = ?1 OR EXISTS (SELECT 1 FROM shares s WHERE s.collection = c.slug
+        AND s.owner = ?1 AND s.current_version IS NOT NULL))
+      ORDER BY c.updated_at DESC, c.slug`).bind(viewer).all<CollectionRow>()
+    return results.map(collectionInfo)
   }
 
   async collectionOwner(slug: string) {

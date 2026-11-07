@@ -17,6 +17,7 @@ export interface ShareSummary {
   o?: string // owner email; undefined on legacy shares (= ADMIN_EMAIL)
   vis?: Visibility // D1+R2 only; undefined = 'org'
   title?: string // D1+R2 only
+  c?: string // collection; D1+R2 only
 }
 
 // one audit log row, newest first from audit()
@@ -134,6 +135,9 @@ export interface QueryStore {
   // shares in it.
   collections(prefix: string, viewer: string | null): Promise<Collection[]>
   collection(slug: string, viewer: string | null): Promise<Collection | null>
+  // the collections of the viewer's own list: the ones the viewer owns
+  // and the ones that hold a live share of the viewer, newest first
+  collectionsFor(viewer: string): Promise<Collection[]>
   // owner of the collection, without the read check; for write checks
   // only, never shown to the writer
   collectionOwner(slug: string): Promise<string | null>

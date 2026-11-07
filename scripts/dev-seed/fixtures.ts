@@ -1,6 +1,7 @@
 // The local dev dataset of scripts/dev-seed.ts. Owner "admin" is
 // ADMIN_EMAIL of the dev worker; the other owners are plain users.
 
+import type { Visibility } from '../../src/api-types'
 import { png } from './png'
 
 export type Content = string | Uint8Array
@@ -23,6 +24,7 @@ export interface Published {
   meta?: Record<string, string | number | boolean>
   versions: Version[]
   public?: boolean
+  visibility?: Visibility // sent with the publish; also set on a skipped one
 }
 
 // admin POST /_import: the only route that takes times. One version per
@@ -254,6 +256,8 @@ export const COLLECTIONS: CollectionSpec[] = [
   { slug: 'metareview/pr-2', owner: 'priya.rao@metabase.com', title: 'metareview: PR 48307', meta: { repo: 'metabase/metabase', pr: 48307 } },
   { slug: 'design/reviews', owner: 'ana.lopez@metabase.com', title: 'Design reviews' },
   { slug: 'analytics', owner: 'sam.chen@metabase.com', title: 'Analytics exports' },
+  // only private shares: a private collection
+  { slug: 'drafts/priya', owner: 'priya.rao@metabase.com', title: 'Planning drafts' },
 ]
 
 export const PUBLISHED: Published[] = [
@@ -318,7 +322,7 @@ export const PUBLISHED: Published[] = [
     })),
   },
   {
-    slug: 'deploy-config', owner: 'admin', title: 'Deploy config',
+    slug: 'deploy-config', owner: 'admin', title: 'Deploy config', visibility: 'private',
     versions: [{ message: 'staging', files: { 'staging.json': config('staging') } },
       { message: 'add prod', files: { 'staging.json': config('staging'), 'prod.json': config('prod') } }],
   },
@@ -348,7 +352,7 @@ export const PUBLISHED: Published[] = [
     versions: [{ files: { 'run.log': Array.from({ length: 40 }, (_, i) => `2026-10-29T14:${String(i).padStart(2, '0')}:00Z step ${i}: ${i % 7 ? 'ok' : 'retry'}`).join('\n') + '\n' } }],
   },
   {
-    slug: 'retro-notes', owner: 'priya.rao@metabase.com', title: 'Q3 retro notes',
+    slug: 'retro-notes', owner: 'priya.rao@metabase.com', title: 'Q3 retro notes', visibility: 'private',
     versions: [1, 2, 3].map((v) => ({
       message: ['notes', 'actions', 'owners'][v - 1],
       files: { 'retro.md': `# Q3 retro\n\n## Went well\n\n- Port to the Metabase account\n- Collections\n${v >= 2 ? '\n## Actions\n\n1. Seed data for local dev\n2. Reset command\n' : ''}${v >= 3 ? '\n## Owners\n\n| Action | Owner |\n|---|---|\n| Seed data | Tyler |\n| Reset | Sam |\n' : ''}` },
@@ -363,12 +367,20 @@ export const PUBLISHED: Published[] = [
     } }],
   },
   {
-    slug: 'design-tokens', owner: 'ana.lopez@metabase.com', title: 'Design tokens', collection: 'design/reviews',
+    slug: 'design-tokens', owner: 'ana.lopez@metabase.com', title: 'Design tokens', collection: 'design/reviews', visibility: 'private',
     versions: [{ files: { 'tokens.css': ':root {\n  --brand: #509ee3;\n  --fg: #2e353b;\n  --bg: #ffffff;\n}\n', 'tokens.json': JSON.stringify({ brand: '#509ee3', fg: '#2e353b', bg: '#ffffff' }, null, 2) } }],
   },
   {
-    slug: 'shell-helpers', owner: 'sam.chen@metabase.com',
+    slug: 'shell-helpers', owner: 'sam.chen@metabase.com', visibility: 'private',
     versions: [{ files: { 'helpers.sh': '#!/bin/sh\n# print the newest share of mine\nshare ls | head -1\n' } }],
+  },
+  {
+    slug: 'chart-palette-notes', owner: 'sam.chen@metabase.com', title: 'Chart palette notes', collection: 'design/reviews',
+    versions: [{ files: { 'palette.md': '# Chart palette\n\nThe signups dashboard needs 3 more series colours.\n\n| Series | Colour |\n|---|---|\n| us-east | #509ee3 |\n| us-west | #88bf4d |\n| eu-central | #a989c5 |\n' } }],
+  },
+  {
+    slug: 'h1-planning-draft', owner: 'priya.rao@metabase.com', title: 'H1 planning draft', collection: 'drafts/priya', visibility: 'private',
+    versions: [{ files: { 'plan.md': '# H1 planning (draft)\n\n1. Retention numbers for version pruning\n2. Collection namespaces\n' } }],
   },
   {
     slug: 'incident-2026-10-12', owner: 'admin', title: 'Incident: R2 latency spike',
@@ -415,7 +427,7 @@ export const IMPORTED: Imported[] = [
 
 // share page GETs after the seed, as these viewers: real view rows
 export const VIEWS: { viewer: Owner; slugs: string[] }[] = [
-  { viewer: 'admin', slugs: ['signups-dashboard', 'mr-48211-review', 'retro-notes'] },
+  { viewer: 'admin', slugs: ['signups-dashboard', 'mr-48211-review'] },
   { viewer: 'ana.lopez@metabase.com', slugs: ['release-notes', 'regional-metrics', 'mr-48307-review'] },
   { viewer: 'sam.chen@metabase.com', slugs: ['release-notes', 'onboarding-flow'] },
   { viewer: 'priya.rao@metabase.com', slugs: ['release-notes', 'signups-dashboard', 'incident-2026-10-12'] },
