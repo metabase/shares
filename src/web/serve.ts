@@ -2,7 +2,7 @@ import { zipSync } from 'fflate'
 import type { Env } from '../env'
 import { ago, esc, notFound, page } from '../render/page'
 import { render } from '../render/files'
-import { isQueryStore, type ShareStore, type ShareSummary } from '../store'
+import { canRead, isQueryStore, type ShareStore, type ShareSummary } from '../store'
 import type { ShareInfo } from '../api-types'
 import { contentBase, hostKind } from '../origins'
 import { approvePage, tokenPage } from './tokens'
@@ -11,7 +11,7 @@ import { ICON, STYLE, copyLink, iconLink, nav, person, recency, when } from './s
 import { uploadToken, uploadUi } from './upload'
 
 const summary = (s: ShareInfo): [string, ShareSummary] =>
-  [s.slug, { n: s.fileCount, t: s.updatedAt, o: s.owner, ...(s.title ? { title: s.title } : {}) }]
+  [s.slug, { n: s.fileCount, t: s.updatedAt, o: s.owner, vis: s.visibility, ...(s.title ? { title: s.title } : {}) }]
 
 export async function serve(url: URL, email: string | null, env: Env, store: ShareStore, accept: string | null): Promise<Response> {
   const key = decodeURIComponent(url.pathname.slice(1))
@@ -35,13 +35,14 @@ export async function serve(url: URL, email: string | null, env: Env, store: Sha
     const query = isQueryStore(store) ? store : null
     let sorted: [string, ShareSummary][]
     if (query && c) {
-      sorted = (await query.queryShares({ collection: c, limit: 1000 })).map(summary)
+      sorted = (await query.queryShares({ collection: c, viewer: email, limit: 1000 })).map(summary)
     } else if (query && q) {
-      sorted = (await query.search(q, admin ? undefined : email!, 200)).map(summary)
+      sorted = (await query.search(q, admin ? undefined : email!, email, 200)).map(summary)
     } else {
       // you see your shares; admin sees everyone's (with an owner column)
+      // but the private shares of others
       const mine = [...await store.shares()]
-        .filter(([, s]) => admin || (s.o || env.ADMIN_EMAIL) === email)
+        .filter(([, s]) => (s.o || env.ADMIN_EMAIL) === email || (admin && s.vis !== 'private'))
       // newest first; pre-timestamp shares (no metadata) sink to the bottom
       sorted = mine.sort((a, b) => b[1].t - a[1].t || a[0].localeCompare(b[0]))
     }
@@ -60,7 +61,7 @@ export async function serve(url: URL, email: string | null, env: Env, store: Sha
     const rows = sorted.map(([p, s]) =>
       `<tr data-p="/${esc(p)}/"><td class="s"><a class="nm" href="${content}/${esc(p)}/">${
         s.title ? `<span class="ti">${esc(s.title)}</span>` : ''}<span class="slug">${esc(p)}</span></a>${
-        s.pub ? '<span class="pub" title="opens without login">public</span>' : ''}</td>${
+        s.vis === 'public' ? '<span class="pub" title="opens without login">public</span>' : ''}</td>${
         owners ? `<td class="o">${person(s.o || env.ADMIN_EMAIL)}</td>` : ''
       }<td class="n">${s.n} file${
         s.n === 1 ? '' : 's'}</td>${viewCell(p)}<td class="t ${s.t ? recency(s.t) : 'old'}" title="${
@@ -210,6 +211,12 @@ pvPump()
 
   // reserved namespace: /_own/... must not render or list (slug enumeration)
   if (key.startsWith('_')) return notFound()
+
+  // One read gate for every path below: content, _peek, _zip, the
+  // directory listing, the redirects and <slug>@<n>. A reader who may not
+  // read the share gets the answer of a slug that does not exist.
+  const access = await store.access(key.split('/')[0])
+  if (access && !canRead(access, email)) return notFound()
 
   // /slug/_peek: first lines of the share's main file, for hover previews;
   // ?full: all of its text, for the preview's copy button

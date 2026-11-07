@@ -118,7 +118,7 @@ describe('public sharing flag on', () => {
     await setPublic(top, 'off', t)
     const r = await api('GET', '/_audit?limit=1000')
     const rows = (await r.text()).split('\n').filter((l) => l.endsWith(`\t${top}`)).map((l) => l.split('\t'))
-    expect(rows.map((x) => [x[1], x[2]])).toEqual([[PAT, 'public.off'], [PAT, 'public.on']])
+    expect(rows.map((x) => [x[1], x[2]])).toEqual([[PAT, 'visibility.org'], [PAT, 'visibility.public']])
     expect((await api('GET', '/_audit', { token: t })).status).toBe(403)
   })
 })
