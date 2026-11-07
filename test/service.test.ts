@@ -98,6 +98,8 @@ describe('service tokens', () => {
     expect((await post(`/_api/shares/${top}`, { title: 'mine' }, await userToken('pat@metabase.com'))).status).toBe(200)
 
     await post('/_api/collections/shared', { title: 's' }, undefined, 'PUT')
+    // a collection without an org share is private to its owner
+    await commit(slug('in-shared'), { 'a.txt': 's' }, { collection: 'shared' }, env.UPLOAD_TOKEN!)
     await post('/_api/collections/other', { title: 'o' }, undefined, 'PUT')
     const cols = await (await api('GET', '/_api/collections', { token })).json<{ slug: string }[]>()
     expect(cols.map((c) => c.slug).sort()).toEqual(['bot/one', 'shared'])

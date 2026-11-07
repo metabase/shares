@@ -335,7 +335,7 @@ export async function collectionsPage(env: Env, store: ShareStore, email: string
     c.title ? `<span class="ti">${esc(c.title)}</span>` : ''}<span class="slug">${esc(c.slug)}</span></a></td>
 <td class="o">${person(c.owner)}</td><td class="n">${c.shares}</td><td class="t">${when(c.updatedAt)}</td></tr>`)
   return page('Collections', `${STYLE}<div class="app">${nav(email, env, 'collections')}<div class="hd"><h1>Collections</h1></div>
-<p class="sub">Every collection. Anyone at Metabase can see the shares in a collection.</p>
+<p class="sub">Collections with a share that anyone at Metabase can open, and your own collections.</p>
 ${rows.length ? `<div class="scroll"><table class="lst"><thead><tr><th>Collection</th><th>Owner</th><th class="r">Shares</th><th>Updated</th></tr></thead><tbody>${rows.join('')}</tbody></table></div>`
     : '<p class="sub">No collections yet.</p>'}</div>`, { poll: false })
 }

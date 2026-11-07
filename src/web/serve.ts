@@ -29,12 +29,14 @@ export async function serve(url: URL, email: string | null, env: Env, store: Sha
     const isAdmin = email === env.ADMIN_EMAIL
     const admin = isAdmin && !url.searchParams.has('mine')
     // ?q=: full text search (D1+R2), best match first; ?c=: the shares of
-    // a collection, which every signed-in user can list (as the JSON API)
+    // a collection that the viewer can read (as the JSON API)
     const q = url.searchParams.get('q')?.trim() || ''
     const c = url.searchParams.get('c') || ''
     const query = isQueryStore(store) ? store : null
     let sorted: [string, ShareSummary][]
     if (query && c) {
+      // a private collection of others answers as a missing one
+      if (!await query.collection(c, email)) return notFound()
       sorted = (await query.queryShares({ collection: c, viewer: email, limit: 1000 })).map(summary)
     } else if (query && q) {
       sorted = (await query.search(q, admin ? undefined : email!, email, 200)).map(summary)
