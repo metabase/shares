@@ -1,4 +1,4 @@
-// Shared look of the web app pages (shares, collections, share page,
+// Shared look of the web app pages (shares list, share page,
 // install, activity): one stylesheet, the nav, and the time cell. Share
 // content pages do not use it and keep the 42rem prose column of page().
 
@@ -212,6 +212,7 @@ export const ICON = {
   gear: svg('<circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/>'),
   download: svg('<path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/>'),
   x: svg('<line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/>'),
+  folder: svg('<path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/>'),
   lock: svg('<rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/>'),
   copy: svg('<rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/>'),
 }
@@ -234,13 +235,13 @@ export function codeBlock(code: string) {
   return `<div class="cb"><button type="button" class="ic cpt" aria-label="Copy" title="Copy">${ICON.copy}</button><pre><code>${esc(code)}</code></pre></div>`
 }
 
-export type NavPage = 'shares' | 'collections' | 'install' | 'activity' | null
+export type NavPage = 'shares' | 'install' | 'activity' | null
 
 // The nav of every app page. The theme select at its end replaces the
 // floating select of page(); its script fills in the stored theme.
 export function nav(email: string, env: Env, current: NavPage) {
   const items: [NavPage, string, string][] = [
-    ['shares', '/', 'Shares'], ['collections', '/_collections', 'Collections'], ['install', '/_token', 'Install']]
+    ['shares', '/', 'Shares'], ['install', '/_token', 'Install']]
   if (email === env.ADMIN_EMAIL) items.push(['activity', '/_stats', 'Activity'])
   const links = items.map(([k, href, label]) =>
     `<a href="${href}"${k === current ? ' class="on" aria-current="page"' : ''}>${label}</a>`).join('')

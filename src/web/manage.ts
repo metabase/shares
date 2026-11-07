@@ -1,8 +1,7 @@
 // Web app pages to find and manage shares, on the app host (or
 // the combined host): the share page /_s/<slug> (attributes, views,
 // versions, files of a version, diffs, and the rename, transfer, delete
-// and title forms) and the collections page /_collections. D1+R2 store
-// only: the KV store has no versions.
+// and title forms). D1+R2 store only: the KV store has no versions.
 
 import type { Env } from '../env'
 import { esc, notFound, page } from '../render/page'
@@ -367,16 +366,4 @@ export async function managePost(req: Request, url: URL, env: Env, store: ShareS
     if (e instanceof StoreError) return message('Not changed', esc(e.message), e.status)
     throw e
   }
-}
-
-// GET /_collections
-export async function collectionsPage(env: Env, store: ShareStore, email: string) {
-  if (!isQueryStore(store)) return notFound()
-  const rows = (await store.collections('', email)).map((c) => `<tr><td class="s"><a class="nm" href="/?c=${encodeURIComponent(c.slug)}">${
-    c.title ? `<span class="ti">${esc(c.title)}</span>` : ''}<span class="slug">${esc(c.slug)}</span></a></td>
-<td class="o">${person(c.owner)}</td><td class="n">${c.shares}</td><td class="t">${when(c.updatedAt)}</td></tr>`)
-  return page('Collections', `${STYLE}<div class="app">${nav(email, env, 'collections')}<div class="hd"><h1>Collections</h1></div>
-<p class="sub">Collections with a share that anyone at Metabase can open, and your own collections.</p>
-${rows.length ? `<div class="scroll"><table class="lst"><thead><tr><th>Collection</th><th>Owner</th><th class="r">Shares</th><th>Updated</th></tr></thead><tbody>${rows.join('')}</tbody></table></div>`
-    : '<p class="sub">No collections yet.</p>'}</div>`, { poll: false })
 }
