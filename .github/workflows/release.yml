@@ -1,25 +1,71 @@
-# Release of the `share` CLI: push a tag cli-v<version> (cli-v0.1.0). A tag
-# with a "-" (cli-v0.2.0-rc.1) makes a prerelease, which install.sh skips
-# (it takes releases/latest).
+# Release of the `share` CLI: the four standalone binaries + SHA256SUMS on a
+# GitHub release cli-v<version>. install.sh (served by the worker at
+# /install.sh) downloads them from releases/latest.
 #
-# binaries: the four standalone binaries + SHA256SUMS on the GitHub release;
-# install.sh (served by the worker at /install.sh) downloads them. Built on
-# macOS: bun cross-compiles all four targets from there (from Linux arm64,
-# the darwin targets fail to build).
+# Two ways in:
+# - Automatic: ci.yml calls this workflow after the deploy of a push to main.
+#   The version job (.github/scripts/cli-version.sh) releases only when a CLI
+#   input (cli/, src/api-types.ts, bun.lock) changed since the newest stable
+#   cli-v tag. The bump is patch; a line "cli: minor" or "cli: major" in the
+#   head commit message or in the body of its merged pull request bumps that
+#   part. gh release creates the tag on the pushed commit. A tag that
+#   GITHUB_TOKEN pushes does not start other workflows, so the build runs
+#   here, in the same run. With dry_run, the run builds but publishes nothing.
+# - By hand: push a tag cli-v<version> (cli-v0.1.0). A tag with a "-"
+#   (cli-v0.2.0-rc.1) makes a prerelease, which install.sh skips.
+#
+# Built on macOS: bun cross-compiles all four targets from there (from Linux
+# arm64, the darwin targets fail to build).
 name: release
 
 on:
   push:
     tags: ['cli-v*']
+  workflow_call:
+    inputs:
+      dry_run:
+        type: boolean
+        default: false
 
 permissions:
   contents: read
 
 jobs:
+  version:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: read
+    outputs:
+      tag: ${{ steps.v.outputs.tag }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+          fetch-tags: true
+      - id: v
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          if [[ "$GITHUB_REF" == refs/tags/cli-v* ]]; then
+            echo "tag=$GITHUB_REF_NAME" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          text="$RUNNER_TEMP/bump.txt"
+          git log -1 --format=%B "$GITHUB_SHA" > "$text"
+          gh api "repos/$GITHUB_REPOSITORY/commits/$GITHUB_SHA/pulls" --jq '.[0].body // ""' >> "$text" || true
+          tag=$(.github/scripts/cli-version.sh "$GITHUB_SHA" "$text")
+          echo "tag=$tag" | tee -a "$GITHUB_OUTPUT"
+
   binaries:
+    needs: version
+    if: needs.version.outputs.tag != ''
     runs-on: macos-latest
     permissions:
       contents: write
+    env:
+      TAG: ${{ needs.version.outputs.tag }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -28,15 +74,16 @@ jobs:
         with:
           bun-version: 1.3.9
       - run: bun install --frozen-lockfile
-      - run: bun cli/build.ts "${GITHUB_REF_NAME#cli-v}"
+      - run: bun cli/build.ts "${TAG#cli-v}"
       - run: |
           dist/share-darwin-arm64 --version
           (cd dist && shasum -a 256 -c SHA256SUMS)
-      - env:
+      - if: ${{ !inputs.dry_run }}
+        env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          v="${GITHUB_REF_NAME#cli-v}"
+          v="${TAG#cli-v}"
           pre=""; case "$v" in *-*) pre="--prerelease" ;; esac
-          gh release create "$GITHUB_REF_NAME" dist/share-* dist/SHA256SUMS $pre \
-            --repo "$GITHUB_REPOSITORY" --title "share CLI $v" \
+          gh release create "$TAG" dist/share-* dist/SHA256SUMS $pre \
+            --repo "$GITHUB_REPOSITORY" --target "$GITHUB_SHA" --title "share CLI $v" \
             --notes "Install: curl -fsSL https://app.shares.metabase.fyi/install.sh | sh"
