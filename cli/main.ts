@@ -23,7 +23,7 @@ export const HELP = `usage: share <file-or-dir> [name]        publish (new slug 
        share <files...>                  glob form: one share named for parent dir
        share -e <file-or-dir> <slug>     overwrite existing share (same URL)
        share -x <file-or-dir> <name>     exact slug, no random suffix (fails if taken)
-       ... | share [-e] -f <name> [slug] publish stdin as file <name>
+       ... | share -f <name> [slug]      publish stdin as file <name> (-e: <slug> needed)
        share rm <url-or-slug>            delete a share (local mirror copy stays)
        share download <url-or-slug> [dest]  pull a share's files into dest/ (default: slug/)
        share cat <url-or-slug>[/file]    print share contents to stdout (URL ok as-is)
@@ -257,7 +257,8 @@ export async function main(argv: string[], io: Io): Promise<number> {
     const ctx = new Ctx(io, opts, loadConfig(io.env))
     const [cmd, ...rest] = args
     if (cmd !== undefined && COMMANDS.has(cmd)) await run(ctx, cmd, rest)
-    else if (cmd === undefined) await list(ctx)
+    // -f takes the file from stdin, so it publishes also with no positional arg
+    else if (cmd === undefined && opts.filename === undefined) await list(ctx)
     else await publish(ctx, args)
     return 0
   } catch (e) {
@@ -448,6 +449,7 @@ async function publish(ctx: Ctx, args: string[]) {
   try {
     if (opts.filename) {
       if (opts.filename.includes('/')) throw new UsageError('-f takes a file name, not a path')
+      if (opts.edit && !args.length) throw new UsageError('usage: share -e -f <name> <slug> (-e needs the share to change)')
       tmp = mkdtempSync(join(tmpdir(), 'share-'))
       const p = join(tmp, opts.filename)
       writeFileSync(p, await io.stdin())
