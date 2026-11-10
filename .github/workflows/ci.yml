@@ -9,6 +9,12 @@
 # CLOUDFLARE_API_TOKEN (environment secret): account-owned token of account
 # Metabase with Workers: Editor on Worker `shares`, D1: Edit, and
 # Zone metabase.fyi: Workers Routes: Write (custom domains).
+#
+# The release job calls release.yml after the deploy: a new CLI release never
+# reaches users before the worker it needs is live. It releases only when the
+# CLI changed (see release.yml). It is the only job with contents: write.
+# workflow_dispatch with release_dry_run runs the release path on any branch,
+# builds the binaries and publishes nothing.
 name: ci
 
 on:
@@ -16,6 +22,11 @@ on:
   push:
     branches: [main]
   workflow_dispatch:
+    inputs:
+      release_dry_run:
+        description: Run the CLI release path; build only, publish nothing
+        type: boolean
+        default: false
 
 permissions:
   contents: read
@@ -57,3 +68,20 @@ jobs:
       - run: bun install --frozen-lockfile
       - run: bun x wrangler d1 migrations apply shares --env metabase --remote
       - run: bun x wrangler deploy --env metabase
+
+  release:
+    needs: [test, deploy]
+    if: >-
+      always() && needs.test.result == 'success' && (
+        (github.event_name == 'push' && github.ref == 'refs/heads/main' && needs.deploy.result == 'success') ||
+        (github.event_name == 'workflow_dispatch' && inputs.release_dry_run))
+    permissions:
+      contents: write
+      pull-requests: read
+    # one release at a time, so that each run computes its version from the tags of the run before
+    concurrency:
+      group: cli-release
+      cancel-in-progress: false
+    uses: ./.github/workflows/release.yml
+    with:
+      dry_run: ${{ github.event_name != 'push' }}

@@ -106,8 +106,14 @@ applies D1 migrations and runs `wrangler deploy --env metabase` to the Metabase 
 account, through the GitHub environment `production`. Worker secrets:
 `bun x wrangler secret put <NAME> --env metabase` (`SESSION_SECRET`, `GOOGLE_CLIENT_SECRET`).
 
-A tag `cli-v<semver>` runs `.github/workflows/release.yml`: CLI binaries and `SHA256SUMS` to a
-GitHub release, which install.sh downloads.
+CLI releases (`.github/workflows/release.yml`) put the CLI binaries and `SHA256SUMS` on a GitHub
+release `cli-v<semver>`, which install.sh downloads. After the deploy of a push to `main`, CI
+releases the CLI when `cli/`, `src/api-types.ts` or `bun.lock` changed since the newest
+`cli-v<x.y.z>` tag. The new version is that tag plus a patch bump. For a minor or major bump, put
+a line `cli: minor` or `cli: major` in the pull request body or the commit message. A hand-pushed
+tag `cli-v<semver>` still makes a release; a tag with a `-` (`cli-v0.3.0-rc.1`) makes a
+prerelease, which install.sh skips. To try the release path on a branch without publishing:
+`gh workflow run ci.yml --ref <branch> -f release_dry_run=true`.
 
 Public sharing (`share --public`) is off unless the var `PUBLIC_SHARING = "1"` is set.
 
