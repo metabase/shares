@@ -28,12 +28,12 @@ const TYPES: Record<string, string> = {
   jsonl: 'application/x-ndjson', ndjson: 'application/x-ndjson',
 }
 
-function codePage(env: Env, key: string, text: string, lang?: string) {
+function codePage(env: Env, key: string, text: string, lang: string | undefined, info?: string) {
   // page() carries hljs for all rendered pages; the class is enough
   return page(
     key.split('/').pop()!,
     `<pre><code${lang ? ` class="language-${lang}"` : ''}>${esc(text)}</code></pre>`,
-    { copy: true, slug: !env.PUBLIC && key.split('/')[0] },
+    { copy: true, slug: !env.PUBLIC && key.split('/')[0], info },
   )
 }
 
@@ -68,7 +68,7 @@ function csvCells(text: string) {
 
 const MAX_CSV_ROWS = 1000
 
-function csvPage(env: Env, key: string, text: string) {
+function csvPage(env: Env, key: string, text: string, info?: string) {
   const clipped = text.length > 2_000_000
   const rows = csvCells(clipped ? text.slice(0, 2_000_000).replace(/\n[^\n]*$/, '') : text)
   const tr = (cells: string[], tag: string) => `<tr>${cells.map((c) => `<${tag}>${esc(c)}</${tag}>`).join('')}</tr>`
@@ -78,12 +78,13 @@ function csvPage(env: Env, key: string, text: string) {
   return page(
     key.split('/').pop()!,
     `<table><thead>${tr(rows[0] || [], 'th')}</thead><tbody>${shown.map((r) => tr(r, 'td')).join('')}</tbody></table>${note}`,
-    { copy: true, slug: !env.PUBLIC && key.split('/')[0] },
+    { copy: true, slug: !env.PUBLIC && key.split('/')[0], info },
   )
 }
 
-// Returns a Response, or null when the key doesn't exist.
-export async function render(key: string, env: Env, store: ShareStore, accept: string | null): Promise<Response | null> {
+// Returns a Response, or null when the key doesn't exist. info: the link
+// of the info button on rendered pages (none when undefined).
+export async function render(key: string, env: Env, store: ShareStore, accept: string | null, info?: string): Promise<Response | null> {
   const ext = key.split('.').pop()!.toLowerCase()
   // browsers navigating (Accept: text/html) get pretty views; fetch()/curl
   // keep getting raw bytes so html shares can load their own data files
@@ -98,14 +99,14 @@ export async function render(key: string, env: Env, store: ShareStore, accept: s
       })
     }
     const title = md.match(/^#\s+(.+)$/m)?.[1] ?? key
-    return page(title, marked.parse(md, { async: false }), { copy: true, slug: !env.PUBLIC && key.split('/')[0] })
+    return page(title, marked.parse(md, { async: false }), { copy: true, slug: !env.PUBLIC && key.split('/')[0], info })
   }
 
   if (wantsHtml && ['json', 'jsonl', 'ndjson', 'csv'].includes(ext)) {
     const text = await store.getText(key)
     if (text === null) return null
-    if (ext === 'csv') return csvPage(env, key, text)
-    return codePage(env, key, prettyJson(text, ext), 'json')
+    if (ext === 'csv') return csvPage(env, key, text, info)
+    return codePage(env, key, prettyJson(text, ext), 'json', info)
   }
 
   if (TYPES[ext]) {
@@ -126,5 +127,5 @@ export async function render(key: string, env: Env, store: ShareStore, accept: s
       headers: { 'content-type': 'application/octet-stream', 'cache-control': 'private, no-cache' },
     })
   }
-  return codePage(env, key, new TextDecoder().decode(buf), CODE_LANGS[ext])
+  return codePage(env, key, new TextDecoder().decode(buf), CODE_LANGS[ext], info)
 }

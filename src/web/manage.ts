@@ -7,7 +7,7 @@ import type { Env } from '../env'
 import { esc, notFound, page } from '../render/page'
 import { ICON, STYLE, copyLink, iconLink, nav, person, privateTag, when } from './shell'
 import { contentBase, hostKind, type HostKind } from '../origins'
-import { canRead, isQueryStore, StoreError, type QueryStore, type ShareStore } from '../store'
+import { INDEX_PAGES, canRead, isQueryStore, StoreError, type QueryStore, type ShareStore } from '../store'
 import type { Collection, ShareInfo, ShareManifest, VersionInfo, Visibility } from '../api-types'
 import { asText, hunks, lineDiff } from './diff'
 import { uploadToken, uploadUi } from './upload'
@@ -58,7 +58,7 @@ export async function sharePage(url: URL, env: Env, store: ShareStore, email: st
   else if (q.has('v')) detail = await versionSection(store, share, self, content, Number(q.get('v')), q.get('f'))
   const live = detail ? null : await store.shareManifest(slug)
   const paths = new Set(live?.files.map((f) => f.path) ?? [])
-  const opens = paths.has('index.md') || paths.has('index.html') || share.fileCount === 1
+  const opens = INDEX_PAGES.some((p) => paths.has(p)) || share.fileCount === 1
 
   const manage = canManage(share, email, env)
   const views = manage ? await store.views(slug) : null
@@ -79,7 +79,7 @@ export async function sharePage(url: URL, env: Env, store: ShareStore, email: st
 <div class="acts">${manage && store.commit ? uploadUi({ token: await uploadToken(env, email), mode: 'version', slug }) : ''}${copyLink(content)}${
   iconLink(`${content}_zip`, 'download', 'Download zip')}${iconLink('#details', 'gear', manage ? 'Details and settings' : 'Details')}${
   opens ? `<a class="btn pri" href="${esc(content)}">Open page</a>` : ''}</div></div>
-${detail ? `<p class="sub"><a href="${self}">Live files</a></p>${detail}` : live ? folderView(live, content, hostKind(url, env)) : ''}
+${detail ? `<p class="sub"><a href="${self}">Live files</a></p>${detail}` : live ? folderView(live, content, hostKind(url, env), INDEX_PAGES.some((p) => paths.has(p))) : ''}
 <h2 id="details">Details</h2>
 <dl class="strip">
 <div><dt>Owner</dt><dd>${person(share.owner, true)}</dd></div>
@@ -127,8 +127,10 @@ const SANDBOX = {
 
 // The live files grouped by folder (top-level files first), each a link
 // to the file on the content host, then the index page in a frame. User
-// HTML never goes into this document.
-function folderView(man: ShareManifest, content: string, kind: HostKind) {
+// HTML never goes into this document. closed: the share opens on its index
+// page (the list links there), so this page is its info page and the frame
+// starts closed; a README.md-only share shows it open.
+function folderView(man: ShareManifest, content: string, kind: HostKind, closed: boolean) {
   const href = (p: string) => `${content}${p.split('/').map(encodeURIComponent).join('/')}`
   const dirOf = (p: string) => p.includes('/') ? p.slice(0, p.lastIndexOf('/') + 1) : ''
   const files = [...man.files].sort((a, b) => dirOf(a.path).localeCompare(dirOf(b.path)) || a.path.localeCompare(b.path))
@@ -144,9 +146,9 @@ function folderView(man: ShareManifest, content: string, kind: HostKind) {
       esc(f.path.slice(d.length))}</span></a></td><td class="ty">${typeOf(f.path)}</td><td class="r">${bytes(f.size)}</td></tr>`)
   }
   const index = INDEX.find((name) => man.files.some((f) => f.path === name))
-  const frame = index ? `<section class="rd" aria-label="${esc(index)}"><div class="rdh">${ICON.file}<span class="mono">${esc(index)}</span>
-<a href="${esc(href(index))}">Open</a></div>
-<iframe src="${esc(href(index))}" title="${esc(index)}" sandbox="${SANDBOX[kind === 'combined' ? 'combined' : 'split']}" referrerpolicy="no-referrer" loading="lazy"></iframe></section>` : ''
+  const frame = index ? `<details class="rd" aria-label="${esc(index)}"${closed ? '' : ' open'}><summary class="rdh">${ICON.file}<span class="mono">${esc(index)}</span>
+<a href="${esc(href(index))}">Open</a></summary>
+<iframe src="${esc(href(index))}" title="${esc(index)}" sandbox="${SANDBOX[kind === 'combined' ? 'combined' : 'split']}" referrerpolicy="no-referrer" loading="lazy"></iframe></details>` : ''
   return `<div class="scroll"><table class="fl"><thead><tr><th>Name</th><th>Type</th><th class="r">Size</th></tr></thead><tbody>${rows.join('')}</tbody></table></div>
 ${frame}`
 }

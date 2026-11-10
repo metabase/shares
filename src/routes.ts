@@ -151,7 +151,7 @@ export async function handle(req: Request, env: Env, ctx: ExecutionContext): Pro
   if (priv && !isNavigation(req)) return forbidden()
 
   const accept = req.headers.get('accept')
-  const res = await serve(url, email, env, store, accept)
+  const res = await serve(url, email, env, store, accept, req.headers.get('sec-fetch-dest') === 'iframe')
   recordView(ctx, store, key, email, res, req)
   return priv ? lockDown(res) : res
 }
@@ -180,7 +180,7 @@ export async function contentHost(req: Request, env: Env, ctx: ExecutionContext)
   }
 
   const accept = req.headers.get('accept')
-  const res = await serve(url, email, env, store, accept)
+  const res = await serve(url, email, env, store, accept, req.headers.get('sec-fetch-dest') === 'iframe')
   recordView(ctx, store, key, email, res, req)
   return res
 }
@@ -261,5 +261,5 @@ async function appRoutes(req: Request, env: Env): Promise<Response> {
     })
   }
 
-  return serve(url, email, env, store, req.headers.get('accept'))
+  return serve(url, email, env, store, req.headers.get('accept'), req.headers.get('sec-fetch-dest') === 'iframe')
 }
