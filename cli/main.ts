@@ -13,6 +13,10 @@ import { filePathUrl, parseLines, parseViews } from '../src/api-types'
 import { DEFAULT_APP, loadConfig, updateConfig, type Config } from './config'
 import { collect, defaultName, deslug, localCopy, localPath, mirror, randomSuffix, readBytes, sha256, type LocalFile } from './files'
 import { client, HttpError, pool, sleep, UsageError, type Client } from './http'
+import {
+  binaryName, fetchBinary, installCommand, isNewer, latestRelease, NotWritable, releaseBase, replaceBinary, tagOf, tooOld,
+  updateNotice, writableTarget,
+} from './update'
 
 declare const SHARE_VERSION: string
 export const VERSION = typeof SHARE_VERSION === 'string' ? SHARE_VERSION : 'dev'
@@ -42,6 +46,9 @@ export const HELP = `usage: share <file-or-dir> [name]        publish (new slug 
        share token create <name> --scope <scope>... [--on-behalf-of <email>] [--days <n>]
                                          admin: a service token for an agent or CI, shown once
        share token revoke <id> [--service]  revoke a token
+       share update [--check] [--version <x.y.z>]
+                                         replace this binary with the latest release
+                                         (or that version); --check only reports
        share                             list all shares
 
 publish and set options:
@@ -87,9 +94,15 @@ as publish paths. Every publish also lands in ~/.local/share/mb-shares/<slug>/
 (MIRROR_DIR in the config overrides it); -e replaces that copy, rm leaves it.
 Config: ~/.config/shares/config (mode 0600), written by \`share login\`.
 SHARES_URL, SHARES_CONTENT_URL and SHARES_TOKEN in the environment override it.
+When the server names a newer release, one line on stderr says so, at most
+once a day; SHARE_NO_UPDATE_CHECK=1 turns it off (off too under CI and when
+stderr is not a terminal).
 `
 
-const COMMANDS = new Set(['login', 'logout', 'whoami', 'rm', 'ls', 'cat', 'download', 'views', 'log', 'public', 'set', 'api', 'local', 'help', 'version', 'token'])
+const COMMANDS = new Set(['login', 'logout', 'whoami', 'rm', 'ls', 'cat', 'download', 'views', 'log', 'public', 'set', 'api', 'local', 'help', 'version', 'token', 'update'])
+
+// commands that run also when the server says this CLI is too old
+const ALWAYS = new Set(['update', 'version', 'help', 'login', 'logout'])
 
 const LABEL: Record<Visibility, string> = {
   private: 'only you',
@@ -112,6 +125,8 @@ export interface Opts {
   scopes: string[]
   onBehalfOf?: string
   days?: number
+  check: boolean
+  updateVersion?: string
 }
 
 export interface Io {
@@ -120,10 +135,13 @@ export interface Io {
   stdin: () => Promise<Uint8Array>
   env: Record<string, string | undefined>
   cwd: string
+  stderrIsTTY?: boolean
+  // the running binary, for `share update`
+  execPath?: string
 }
 
 export function parseArgs(argv: string[]): { opts: Opts; args: string[] } {
-  const opts: Opts = { json: false, edit: false, exact: false, noCollection: false, meta: {}, service: false, scopes: [] }
+  const opts: Opts = { json: false, edit: false, exact: false, noCollection: false, meta: {}, service: false, scopes: [], check: false }
   const args: string[] = []
   const value = (i: number, flag: string) => {
     const v = argv[i + 1]
@@ -148,7 +166,13 @@ export function parseArgs(argv: string[]): { opts: Opts; args: string[] } {
       case '--org': vis('org', a); break
       case '--no-collection': opts.noCollection = true; break
       case '-h': case '--help': args.unshift('help'); break
-      case '-V': case '--version': args.unshift('version'); break
+      // `share update --version <x.y.z>` names a release; elsewhere it prints the version
+      case '--version':
+        if (args[0] === 'update') opts.updateVersion = value(i++, a)
+        else args.unshift('version')
+        break
+      case '-V': args.unshift('version'); break
+      case '--check': opts.check = true; break
       case '--local': args.unshift('local'); break
       case '-f': case '--filename': opts.filename = value(i++, a); break
       case '-c': case '--collection': opts.collection = value(i++, a); break
@@ -195,7 +219,18 @@ export function setAttrs(opts: Opts): ShareAttrs {
 const enc = encodeURIComponent
 
 class Ctx {
+  // set for the ALWAYS commands: no too-old stop
+  allowOld = false
+  private noticed = false
+
   constructor(readonly io: Io, readonly opts: Opts, readonly cfg: Config) {}
+
+  // the version headers of a server answer (src/cli-version.ts)
+  private versionHeaders = (res: Response) => {
+    const old = tooOld(res.headers.get('x-share-cli-min'), VERSION)
+    if (old && !this.allowOld) throw new Error(old)
+    if (!this.noticed) this.noticed = updateNotice(res.headers.get('x-share-cli-latest'), VERSION, this.io)
+  }
 
   // human output; --json prints only the final value
   say(s: string) { if (!this.opts.json) this.io.stdout(s.endsWith('\n') ? s : s + '\n') }
@@ -206,7 +241,7 @@ class Ctx {
     if (!this.cfg.baseUrl || !this.cfg.token) {
       throw new UsageError(`not logged in: run \`share login\` (config ${this.cfg.path})`)
     }
-    return client(this.cfg.baseUrl, this.cfg.token)
+    return client(this.cfg.baseUrl, this.cfg.token, this.versionHeaders)
   }
 
   get contentBase() { return this.cfg.contentUrl || this.cfg.baseUrl! }
@@ -256,6 +291,7 @@ export async function main(argv: string[], io: Io): Promise<number> {
     json = opts.json
     const ctx = new Ctx(io, opts, loadConfig(io.env))
     const [cmd, ...rest] = args
+    ctx.allowOld = cmd !== undefined && ALWAYS.has(cmd)
     if (cmd !== undefined && COMMANDS.has(cmd)) await run(ctx, cmd, rest)
     // -f takes the file from stdin, so it publishes also with no positional arg
     else if (cmd === undefined && opts.filename === undefined) await list(ctx)
@@ -275,6 +311,7 @@ async function run(ctx: Ctx, cmd: string, a: string[]) {
     case 'version': ctx.say(`share ${VERSION}`); ctx.emit({ version: VERSION }); return
     case 'login': return login(ctx, a[0])
     case 'token': return token(ctx, a)
+    case 'update': return update(ctx)
     case 'logout': return logout(ctx)
     case 'whoami': {
       const w = await ctx.api.json<WhoAmI>('GET', '/_api/whoami')
@@ -434,6 +471,43 @@ async function token(ctx: Ctx, a: string[]) {
     }
     default: throw new UsageError(`usage: ${usage}`)
   }
+}
+
+// share update [--check] [--version <x.y.z>]: the release binary for this
+// machine, checked against SHA256SUMS, renamed over the running binary
+async function update(ctx: Ctx) {
+  const { env } = ctx.io
+  if (VERSION === 'dev') throw new Error('this is a dev build (not a release binary); it does not update itself. Install a release: curl -fsSL <app>/install.sh | sh')
+  const want = ctx.opts.updateVersion !== undefined ? tagOf(ctx.opts.updateVersion).version : undefined
+  // SHARE_RELEASE_URL (tests, mirrors) holds files only, no version to compare
+  const target = want ?? (env.SHARE_RELEASE_URL ? undefined : await latestRelease())
+  if (ctx.opts.check) {
+    if (!target) throw new Error('SHARE_RELEASE_URL is set: no latest version to compare (give --version)')
+    const newer = isNewer(target, VERSION)
+    ctx.say(newer ? `share ${target} is out (you have ${VERSION}): share update` : `share ${VERSION} is up to date (latest ${target})`)
+    ctx.emit({ current: VERSION, latest: target, update: newer })
+    return
+  }
+  const path = ctx.io.execPath ?? process.execPath
+  if (target && target === VERSION) {
+    ctx.say(`share ${VERSION} is up to date`)
+    ctx.emit({ current: VERSION, latest: target, updated: false, path })
+    return
+  }
+  const name = binaryName(env)
+  const base = releaseBase(env, want)
+  const notWritable = (e: unknown) => {
+    if (!(e instanceof NotWritable)) return e
+    const app = (ctx.cfg.legacy ? undefined : ctx.cfg.baseUrl) || DEFAULT_APP
+    return new Error(`${e.message}; run:\n  ${installCommand(app, e.dir, want && tagOf(want).tag)}`)
+  }
+  try { writableTarget(path) } catch (e) { throw notWritable(e) }
+  if (!ctx.opts.json) ctx.note(`downloading ${base}/${name}`)
+  const bin = await fetchBinary(base, name)
+  let got: string
+  try { got = replaceBinary(path, bin) } catch (e) { throw notWritable(e) }
+  ctx.say(`updated share ${VERSION} -> ${got} (${path})`)
+  ctx.emit({ current: VERSION, latest: got, updated: true, path })
 }
 
 async function list(ctx: Ctx) {

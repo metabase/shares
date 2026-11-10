@@ -18,7 +18,8 @@ export interface Client {
 
 const RETRIES = 2
 
-export function client(base: string, token?: string): Client {
+// onResponse sees every final response (headers only); it may throw to stop
+export function client(base: string, token?: string, onResponse?: (res: Response) => void): Client {
   const c: Client = {
     base,
     async request(method, path, init = {}) {
@@ -42,6 +43,9 @@ export function client(base: string, token?: string): Client {
           await res.body?.cancel()
           await sleep(500 * (attempt + 1))
           continue
+        }
+        if (onResponse) {
+          try { onResponse(res) } catch (e) { await res.body?.cancel(); throw e }
         }
         return res
       }

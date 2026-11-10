@@ -74,7 +74,7 @@ beforeAll(async () => {
   })
   if (m.status !== 0) throw new Error(`migrations: ${m.stderr}`)
   worker = spawn(wr, ['dev', '--port', String(PORT), '--ip', process.env.E2E_HOST ? '0.0.0.0' : '127.0.0.1', '--persist-to', state,
-    '--var', `SESSION_SECRET:${SECRET}`, '--var', `UPLOAD_TOKEN:${ADMIN_TOKEN}`, '--var', 'PUBLIC_SHARING:1'], {
+    '--var', `SESSION_SECRET:${SECRET}`, '--var', `UPLOAD_TOKEN:${ADMIN_TOKEN}`, '--var', 'PUBLIC_SHARING:1', '--var', 'CLI_LATEST_URL:off'], {
     cwd: ROOT, env: { ...process.env, CI: '1' }, stdio: 'ignore',
   })
   for (let i = 0; i < 200; i++) {

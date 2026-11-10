@@ -11,6 +11,8 @@ export default defineConfig({
           UPLOAD_TOKEN: 'test-upload-token',
           // wrangler reads .dev.vars too; the tests set DEV_LOGIN themselves
           DEV_LOGIN: '',
+          // no GitHub lookup for x-share-cli-latest
+          CLI_LATEST_URL: 'off',
           // split hosts; ORIGIN of test/helpers.ts matches neither (combined)
           CONTENT_HOST: 'content.shares.test',
           APP_HOST: 'app.shares.test',

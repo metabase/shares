@@ -2,6 +2,8 @@ import { defineConfig } from 'vitest/config'
 
 // The CLI runs in Node or as a bun binary, not in the Worker runtime.
 export default defineConfig({
+  // a release build's version, as cli/build.ts sets it
+  define: { SHARE_VERSION: JSON.stringify('0.2.0') },
   test: {
     root: import.meta.dirname,
     include: ['test/**/*.test.ts'],

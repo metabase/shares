@@ -4,6 +4,7 @@ import {
   authenticate, setCookie, signEmail, ticketTag, verifyEmail,
 } from './auth'
 import { cli } from './api/cli'
+import { withCliHeaders } from './cli-version'
 import { serviceApi } from './api/service'
 import { tokensApi } from './api/tokens'
 import CLI_SH from '../bin/share' // text module (wrangler.toml rules)
@@ -32,7 +33,11 @@ function isApi(req: Request, url: URL) {
 
 const bearerOf = (req: Request) => (req.headers.get('authorization') || '').replace(/^Bearer /, '')
 
-async function api(req: Request, url: URL, env: Env, store: ShareStore) {
+async function api(req: Request, url: URL, env: Env, store: ShareStore, ctx?: ExecutionContext) {
+  return withCliHeaders(await apiRoutes(req, url, env, store), env, ctx)
+}
+
+async function apiRoutes(req: Request, url: URL, env: Env, store: ShareStore) {
   const who = await authenticate(env, bearerOf(req))
   if (!who) return new Response('unauthorized\n', { status: 401, headers: { 'www-authenticate': 'Bearer' } })
   if (who.kind === 'service') return serviceApi(req, url, env, store, who)
@@ -133,7 +138,7 @@ export async function handle(req: Request, env: Env, ctx: ExecutionContext): Pro
   if (pub) return pub
   if (isFormPost(req, url, env)) return lockDown(await form(req, url, env, await sessionEmail(req, env)))
   if (isUpload(req, url, env)) return lockDown(await upload(req, url, env, store, await sessionEmail(req, env)))
-  if (isApi(req, url)) return api(req, url, env, store)
+  if (isApi(req, url)) return api(req, url, env, store, ctx)
 
   if (url.pathname === '/auth/callback' && !env.PUBLIC) return handleCallback(url, env)
   if (url.pathname === '/_dev/login') {
@@ -208,11 +213,11 @@ async function acceptTicket(url: URL, env: Env) {
 
 // App host: API, login, tokens and the UI. Share content goes to the
 // content host. Every response refuses framing.
-export async function appHost(req: Request, env: Env): Promise<Response> {
-  return lockDown(await appRoutes(req, env))
+export async function appHost(req: Request, env: Env, ctx?: ExecutionContext): Promise<Response> {
+  return lockDown(await appRoutes(req, env, ctx))
 }
 
-async function appRoutes(req: Request, env: Env): Promise<Response> {
+async function appRoutes(req: Request, env: Env, ctx?: ExecutionContext): Promise<Response> {
   const url = new URL(req.url)
   const store = storeFor(env)
 
@@ -225,7 +230,7 @@ async function appRoutes(req: Request, env: Env): Promise<Response> {
   if (url.pathname === '/install.sh' && req.method === 'GET' && !env.PUBLIC) return installScript(url, env)
   if (isFormPost(req, url, env)) return form(req, url, env, await sessionEmail(req, env, COOKIE.app))
   if (isUpload(req, url, env)) return upload(req, url, env, store, await sessionEmail(req, env, COOKIE.app))
-  if (isApi(req, url)) return api(req, url, env, store)
+  if (isApi(req, url)) return api(req, url, env, store, ctx)
 
   if (url.pathname === '/auth/callback' && !env.PUBLIC) return handleCallback(url, env, COOKIE.app)
 

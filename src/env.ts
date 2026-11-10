@@ -23,6 +23,12 @@ export interface Env {
   // "1": GET /_dev/login signs in without Google on a loopback host.
   // Local only (.dev.vars); no deploy env sets it.
   DEV_LOGIN?: string
+  // x.y.z: CLI answers carry x-share-cli-min; an older CLI stops and asks
+  // for `share update`. Unset: no minimum.
+  CLI_MIN_VERSION?: string
+  // the URL that redirects to the latest CLI release tag (default: GitHub);
+  // "off": no x-share-cli-latest header
+  CLI_LATEST_URL?: string
 
   // secrets
   GOOGLE_CLIENT_SECRET?: string
