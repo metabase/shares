@@ -105,6 +105,12 @@ ${[0, 1, 2, 3, 4, 5, 6].map((i) => `  .app .av.h${i}{--av:var(--h${i})}`).join('
     background:var(--code-bg);font-size:.85rem}
   .sh .rdh svg{width:15px;height:15px;color:var(--muted)}
   .sh .rdh a{margin-left:auto;font-size:.8rem}
+  .sh summary.rdh{cursor:pointer;list-style:none}
+  .sh summary.rdh::-webkit-details-marker{display:none}
+  .sh summary.rdh::before{content:'';flex:none;width:.4rem;height:.4rem;margin:0 .15rem 0 .05rem;
+    border:solid var(--muted);border-width:0 1.5px 1.5px 0;transform:rotate(-45deg);transition:transform .1s}
+  .sh .rd[open]>summary.rdh::before{transform:rotate(45deg)}
+  .sh .rd:not([open])>summary.rdh{border-bottom:0}
   .sh .rd iframe{display:block;width:100%;height:70vh;min-height:20rem;border:0;background:#fff;color-scheme:normal}
   .sh dl.strip{display:flex;flex-wrap:wrap;gap:.4rem 2rem;border:1px solid var(--border);border-radius:8px;
     padding:.6rem 1rem}
@@ -229,6 +235,7 @@ export const ICON = {
   folder: svg('<path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/>'),
   lock: svg('<rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/>'),
   file: svg('<path d="M13 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V9z"/><polyline points="13 2 13 9 20 9"/>'),
+  info: svg('<circle cx="12" cy="12" r="10"/><line x1="12" y1="16" x2="12" y2="12"/><line x1="12" y1="8" x2="12.01" y2="8"/>'),
   copy: svg('<rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/>'),
 }
 

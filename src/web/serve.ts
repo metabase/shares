@@ -2,12 +2,12 @@ import { zipSync } from 'fflate'
 import type { Env } from '../env'
 import { ago, esc, notFound, page } from '../render/page'
 import { render } from '../render/files'
-import { canRead, isQueryStore, type ShareStore, type ShareSummary } from '../store'
+import { INDEX_PAGES, canRead, isQueryStore, pinned, type ShareStore, type ShareSummary } from '../store'
 import type { Collection, ShareInfo } from '../api-types'
 import { appBase, contentBase, hostKind } from '../origins'
 import { approvePage, tokenPage } from './tokens'
 import { sharePage } from './manage'
-import { ICON, STYLE, copyLink, nav, person, privateTag, recency, when } from './shell'
+import { ICON, STYLE, copyLink, iconLink, nav, person, privateTag, recency, when } from './shell'
 import { uploadToken, uploadUi } from './upload'
 
 // entries of the hover preview
@@ -43,7 +43,18 @@ const colMatch = (q: string) => {
   }
 }
 
-export async function serve(url: URL, email: string | null, env: Env, store: ShareStore, accept: string | null): Promise<Response> {
+// The share's page in the app, for the info button of rendered pages: none
+// on PUBLIC (no app), on a store without that page (KV), and in the index
+// frame of that page itself. A pinned top "<slug>@<n>" opens version n.
+export function infoLink(url: URL, env: Env, store: ShareStore, top: string, framed: boolean) {
+  if (env.PUBLIC || framed || !isQueryStore(store)) return undefined
+  const pin = pinned(top)
+  return `${appBase(url, env)}/_s/${encodeURIComponent(pin?.slug ?? top)}${pin ? `?v=${pin.version}` : ''}`
+}
+
+// framed: the request is a frame navigation (sec-fetch-dest iframe)
+export async function serve(url: URL, email: string | null, env: Env, store: ShareStore, accept: string | null,
+  framed = false): Promise<Response> {
   const key = decodeURIComponent(url.pathname.slice(1))
   // share links on the listing go to the content host; '' on a single host
   const content = contentBase(url, env)
@@ -105,9 +116,13 @@ export async function serve(url: URL, email: string | null, env: Env, store: Sha
     }
     const timeCell = (t: number) => `<td class="t ${t ? recency(t) : 'old'}" title="${
       t ? new Date(t).toISOString() : 'published before timestamps existed'}">${ago(t)}</td>`
-    // a share opens as its folder view in the app; a store without that
-    // page (KV) links to the share on the content host
-    const open = (p: string) => query ? `/_s/${encodeURIComponent(p)}` : `${content}/${esc(p)}/`
+    // a share with an index page opens on that page on the content host,
+    // with an info link to its page in the app; a share without one opens
+    // its page in the app. A store without that page (KV) links to the
+    // share on the content host.
+    const indexes = query ? await query.indexPages(sorted.map(([p]) => p)) : new Map<string, string>()
+    const info = (p: string) => query ? `/_s/${encodeURIComponent(p)}` : `${content}/${esc(p)}/`
+    const open = (p: string) => indexes.has(p) ? `${content}/${esc(p)}/` : info(p)
     // the name cell: the title, else the slug; the full slug is the hover
     // title. Outside a collection view, a share in a collection shows the
     // collection as a chip that links to its view.
@@ -120,8 +135,8 @@ export async function serve(url: URL, email: string | null, env: Env, store: Sha
     const shareRow = ([p, s]: [string, ShareSummary]) =>
       `<tr data-p="/${esc(p)}/">${nameCell(p, s)}${
         owners ? `<td class="o">${person(s.o || env.ADMIN_EMAIL)}</td>` : ''
-      }<td class="n"><a href="${open(p)}">${s.n} file${s.n === 1 ? '' : 's'}</a></td>${viewCell(p)}${timeCell(s.t)}<td class="acts">${
-        copyLink(`${content}/${p}/`)}</td></tr>`
+      }<td class="n"><a href="${info(p)}">${s.n} file${s.n === 1 ? '' : 's'}</a></td>${viewCell(p)}${timeCell(s.t)}<td class="acts">${
+        indexes.has(p) ? iconLink(info(p), 'info', 'Files and details') : ''}${copyLink(`${content}/${p}/`)}</td></tr>`
     // a collection row has no peek (no data-p)
     const colRow = (k: Collection) =>
       `<tr class="col"><td class="s"><a class="nm fd" href="/?c=${encodeURIComponent(k.slug)}" title="${esc(k.slug)}">${ICON.folder}<span class="ti${
@@ -351,9 +366,11 @@ pvPump()
     })
   }
 
+  const info = infoLink(url, env, store, key.split('/')[0], framed)
+
   if (key.endsWith('/')) {
-    for (const cand of [`${key}index.md`, `${key}index.html`]) {
-      const hit = await render(cand, env, store, accept)
+    for (const cand of INDEX_PAGES.map((n) => key + n)) {
+      const hit = await render(cand, env, store, accept, info)
       if (hit) return hit
     }
     const names = await store.filesUnder(key)
@@ -363,14 +380,11 @@ pvPump()
     const items = names.map(
       (n) => `<li><a href="/${esc(n)}">${esc(n.slice(key.length))}</a></li>`,
     )
-    const top = key.split('/')[0]
-    const app = isQueryStore(store) && !env.PUBLIC
-      ? ` · <a href="${appBase(url, env)}/_s/${encodeURIComponent(top)}">open in shares</a>` : ''
     return page(key, `<h1>${esc(key.replace(/\/$/, ''))}</h1><ul>${items.join('')}</ul>
-<p><a href="/${esc(key)}_zip">download all (.zip)</a>${app}</p>`, { slug: !env.PUBLIC && key.split('/')[0] })
+<p><a href="/${esc(key)}_zip">download all (.zip)</a></p>`, { slug: !env.PUBLIC && key.split('/')[0], info })
   }
 
-  const hit = await render(key, env, store, accept)
+  const hit = await render(key, env, store, accept, info)
   if (hit) return hit
 
   // /name -> /name/ when the share exists. Manifest get only, no lazy heal:

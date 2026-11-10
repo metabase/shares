@@ -2,6 +2,8 @@ import { env } from 'cloudflare:workers'
 import { describe, expect, it } from 'vitest'
 import { COOKIE, CONTENT_TAG, signEmail, ticketTag } from '../src/auth'
 import { APP, CONTENT, api, fetchWorker, publish, slug, userToken } from './helpers'
+import { infoLink } from '../src/web/serve'
+import { storeFor } from '../src/store'
 
 const NAV = { 'sec-fetch-mode': 'navigate', 'sec-fetch-dest': 'document', accept: 'text/html,*/*' }
 // a fetch() from script in a share on the content host
@@ -247,11 +249,64 @@ describe('app host', () => {
     expect(views.map((l) => l.split('\t').slice(0, 2))).toEqual([['vic@metabase.com', '1']])
   })
 
-  it('links the content host directory listing to the folder view', async () => {
+  it('gives the content host directory listing an info button to the share page', async () => {
     const top = slug('dl')
     await publish(top, { 'a.txt': 'a', 'b.txt': 'b' })
     const r = await onContent(`/${top}/`, { headers: { ...NAV, cookie: await contentCookie('pat@metabase.com') } })
-    expect(await r.text()).toContain(`<a href="${APP}/_s/${top}">open in shares</a>`)
+    expect(await r.text()).toContain(`<div id="tbar"><a id="info" href="${APP}/_s/${top}"`)
+  })
+
+  it('links a share with an index page to that page and its info icon to the share page', async () => {
+    const token = await userToken('idx@metabase.com')
+    const md = slug('imd'), html = slug('ihtml'), readme = slug('irdm'), txt = slug('itxt')
+    await publish(md, { 'index.md': '# i', 'a.txt': 'a' }, token)
+    await publish(html, { 'index.html': '<p>i</p>', 'a.txt': 'a' }, token)
+    await publish(readme, { 'README.md': '# r', 'a.txt': 'a' }, token)
+    await publish(txt, { 'a.txt': 'a', 'b.txt': 'b' }, token)
+    const list = await (await onApp('/', { headers: { ...NAV, cookie: await appCookie('idx@metabase.com') } })).text()
+    for (const top of [md, html]) {
+      expect(list).toContain(`href="${CONTENT}/${top}/" title="${top}"`)
+      expect(list).toContain(`<td class="n"><a href="/_s/${top}">2 files</a></td>`)
+      expect(list).toContain(`<a class="btn ic" href="/_s/${top}" aria-label="Files and details"`)
+    }
+    for (const top of [readme, txt]) {
+      expect(list).toContain(`href="/_s/${top}" title="${top}"`)
+      expect(list).not.toContain(`href="${CONTENT}/${top}/" title="${top}"`)
+      expect(list).not.toContain(`<a class="btn ic" href="/_s/${top}"`)
+    }
+  })
+
+  it('puts an info button next to copy on rendered pages, but not in the share page frame', async () => {
+    const top = slug('inf')
+    await publish(top, { 'index.md': '# i', 'a.json': '{}', 'b.csv': 'x\n1', 'c.py': 'x = 1' })
+    const cookie = await contentCookie('pat@metabase.com')
+    const bar = `<div id="tbar"><a id="info" href="${APP}/_s/${top}" title="files, versions and details of this share">info</a><button id="cpall"`
+    for (const path of [`/${top}/`, `/${top}/index.md`, `/${top}/a.json`, `/${top}/b.csv`, `/${top}/c.py`]) {
+      expect(await (await onContent(path, { headers: { ...NAV, cookie } })).text(), path).toContain(bar)
+    }
+    const framed = await (await onContent(`/${top}/index.md`, { headers: { ...NAV, 'sec-fetch-dest': 'iframe', cookie } })).text()
+    expect(framed).toContain('<div id="tbar"><button id="cpall"')
+    expect(framed).not.toContain('id="info"')
+    const pin = await (await onContent(`/${top}@1/index.md`, { headers: { ...NAV, cookie } })).text()
+    expect(pin).toContain(`<a id="info" href="${APP}/_s/${top}?v=1"`)
+  })
+
+  it('serves user HTML as published, with no info button', async () => {
+    const top = slug('uh')
+    await publish(top, { 'index.html': '<p>mine</p>' })
+    const r = await onContent(`/${top}/`, { headers: { ...NAV, cookie: await contentCookie('pat@metabase.com') } })
+    expect(await r.text()).toBe('<p>mine</p>')
+  })
+
+  it('starts the index frame closed on the share page when the share opens on its index page', async () => {
+    const cookie = await appCookie('pat@metabase.com')
+    const md = slug('fmd'), readme = slug('frdm')
+    await publish(md, { 'index.md': '# i', 'a.txt': 'a' }, await userToken('pat@metabase.com'))
+    await publish(readme, { 'README.md': '# r', 'a.txt': 'a' }, await userToken('pat@metabase.com'))
+    const closed = await (await onApp(`/_s/${md}`, { headers: { ...NAV, cookie } })).text()
+    expect(closed).toContain('<details class="rd" aria-label="index.md"><summary class="rdh">')
+    const open = await (await onApp(`/_s/${readme}`, { headers: { ...NAV, cookie } })).text()
+    expect(open).toContain('<details class="rd" aria-label="README.md" open><summary class="rdh">')
   })
 })
 
@@ -259,5 +314,18 @@ describe('app host', () => {
 describe('combined host', () => {
   it('keeps serving the API on one origin', async () => {
     expect((await api('GET', '/_list')).status).toBe(200)
+  })
+})
+
+describe('info link', () => {
+  const url = new URL(`${CONTENT}/x/index.md`)
+  it('goes to the share page in the app', () => {
+    expect(infoLink(url, env, storeFor(env), 'x', false)).toBe(`${APP}/_s/x`)
+  })
+
+  it('is absent on the PUBLIC deployment, in a frame and on the KV store', () => {
+    expect(infoLink(url, { ...env, PUBLIC: '1' }, storeFor(env), 'x', false)).toBeUndefined()
+    expect(infoLink(url, env, storeFor(env), 'x', true)).toBeUndefined()
+    expect(infoLink(url, env, storeFor({ ...env, DB: undefined } as unknown as typeof env), 'x', false)).toBeUndefined()
   })
 })

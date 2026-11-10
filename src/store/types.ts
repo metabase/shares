@@ -150,6 +150,9 @@ export interface QueryStore {
   versions(slug: string): Promise<VersionInfo[]>
   // live version when version is undefined; null when there is none
   shareManifest(slug: string, version?: number): Promise<ShareManifest | null>
+  // the index page that the content host shows at /<slug>/ (INDEX_PAGES,
+  // top level of the live version) of each slug that has one
+  indexPages(slugs: string[]): Promise<Map<string, string>>
 
   // Web app. Full text search over slug, title, collection, owner,
   // file paths and metadata; every word is a prefix. Best match first.
@@ -162,6 +165,9 @@ export interface QueryStore {
   // new owner; audit logged; the visibility stays. The caller checks the email.
   transfer(slug: string, to: string, by: string): Promise<void>
 }
+
+// the files that the content host renders at /<slug>/, first match wins
+export const INDEX_PAGES = ['index.md', 'index.html']
 
 export function isQueryStore(s: ShareStore): s is ShareStore & QueryStore {
   return 'queryShares' in s

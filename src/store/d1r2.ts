@@ -9,7 +9,7 @@
 // one D1 batch (a transaction) marks it complete and moves current_version.
 
 import type { Env } from '../env'
-import { VISIBILITIES, baseSlug, pinned, StoreError } from './types'
+import { INDEX_PAGES, VISIBILITIES, baseSlug, pinned, StoreError } from './types'
 import type { ImportRequest, ImportResponse } from '../api-types'
 import type {
   Access, AuditEntry, Collection, CollectionUpdate, CommitFile, Manifest, QueryStore, ShareAttrs, ShareFilter, ShareInfo,
@@ -457,6 +457,22 @@ export class D1R2Store implements ShareStore, QueryStore {
       WHERE s.slug = ? AND substr(f.path, 1, ?) = ? ORDER BY f.path`)
       .bind(slug, rest.length, rest).all<{ path: string }>()
     return results.map((r) => `${slug}/${r.path}`)
+  }
+
+  // one query for a whole list: the slugs go in as one JSON array (D1
+  // binds at most 100 parameters)
+  async indexPages(slugs: string[]) {
+    const out = new Map<string, string>()
+    if (!slugs.length) return out
+    const { results } = await this.db.prepare(`SELECT s.slug, f.path FROM json_each(?1) j
+      JOIN shares s ON s.slug = j.value
+      JOIN files f ON f.share = s.slug AND f.version = s.current_version AND f.path IN (SELECT value FROM json_each(?2))`)
+      .bind(JSON.stringify(slugs), JSON.stringify(INDEX_PAGES)).all<{ slug: string; path: string }>()
+    for (const r of results) {
+      const cur = out.get(r.slug)
+      if (!cur || INDEX_PAGES.indexOf(r.path) < INDEX_PAGES.indexOf(cur)) out.set(r.slug, r.path)
+    }
+    return out
   }
 
   async shares() {

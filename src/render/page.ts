@@ -5,6 +5,7 @@ export interface PageOpts {
   copy?: boolean
   poll?: boolean
   slug?: string | false
+  info?: string
 }
 
 export const esc = (s: string) => s.replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]!))
@@ -21,6 +22,8 @@ function vhash(s: string) {
 // Pages with time-relative text pass stable data instead to avoid a
 // fingerprint that changes every render (= infinite reload loop).
 // opts.copy: show the fixed top-right button that copies the raw file.
+// opts.info: the share's page in the app (files, versions, details); an
+// "info" button next to copy goes there.
 // opts.poll: false disables the auto-refresh poll -- the listing page must
 // not re-render itself every 15s (each render costs a KV list; 1k/day cap).
 // The link emoji as the tab icon of every page that page() makes.
@@ -99,17 +102,18 @@ export function page(title: string, body: string, opts: PageOpts = {}) {
   .footnotes{margin-top:2rem;border-top:1px solid var(--border);font-size:.9em}
   .sr-only{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0,0,0,0)}
   :target{background:var(--target)}
-  #cpall{position:fixed;top:.75rem;right:.75rem;z-index:9;font:inherit;font-size:.75rem;
-    color:var(--muted);background:var(--code-bg);border:1px solid var(--border);
-    border-radius:6px;padding:.15em .6em;cursor:pointer}
-  #cpall:hover{color:var(--fg);border-color:var(--muted)}
+  #tbar{position:fixed;top:.75rem;right:.75rem;z-index:9;display:flex;gap:.4rem}
+  #tbar>*{font:inherit;font-size:.75rem;color:var(--muted);background:var(--code-bg);border:1px solid var(--border);
+    border-radius:6px;padding:.15em .6em;cursor:pointer;text-decoration:none}
+  #tbar>:hover{color:var(--fg);border-color:var(--muted)}
   #thg{position:fixed;bottom:.75rem;right:.75rem;z-index:9;font:inherit;font-size:.75rem;
     color:var(--muted);background:var(--code-bg);border:1px solid var(--border);
     border-radius:6px;padding:.1em .3em}
 </style>
 <link rel="stylesheet" data-hl media="(prefers-color-scheme: light)" href="${HLJS}/styles/github.min.css">
 <link rel="stylesheet" data-hl media="(prefers-color-scheme: dark)" href="${HLJS}/styles/github-dark.min.css">
-${opts.copy ? '<button id="cpall" title="copy raw file contents">copy</button>' : ''}
+${opts.copy || opts.info ? `<div id="tbar">${opts.info ? `<a id="info" href="${esc(opts.info)}" title="files, versions and details of this share">info</a>` : ''}${
+  opts.copy ? '<button id="cpall" title="copy raw file contents">copy</button>' : ''}</div>` : ''}
 ${body}
 ${opts.slug ? `<footer><small>clone this share: <code>share download ${esc(opts.slug)}</code>
  (no cli yet? grab it at <a href="/_token">/_token</a>)</small></footer>` : ''}
