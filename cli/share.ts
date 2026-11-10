@@ -12,5 +12,7 @@ const code = await main(process.argv.slice(2), {
   },
   env: process.env,
   cwd: process.cwd(),
+  stderrIsTTY: !!process.stderr.isTTY,
+  execPath: process.execPath,
 })
 process.exitCode = code

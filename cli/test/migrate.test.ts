@@ -92,7 +92,7 @@ beforeAll(async () => {
   })
   if (m.status !== 0) throw new Error(`migrations: ${m.stderr}`)
   worker = spawn(wr, ['dev', '--port', String(PORT), '--ip', '127.0.0.1', '--persist-to', state,
-    '--var', 'SESSION_SECRET:migrate-secret', '--var', `UPLOAD_TOKEN:${ADMIN_TOKEN}`], {
+    '--var', 'SESSION_SECRET:migrate-secret', '--var', `UPLOAD_TOKEN:${ADMIN_TOKEN}`, '--var', 'CLI_LATEST_URL:off'], {
     cwd: ROOT, env: { ...process.env, CI: '1' }, stdio: 'ignore',
   })
   for (let i = 0; i < 200; i++) {

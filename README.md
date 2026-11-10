@@ -29,6 +29,13 @@ A share is readable by anyone at Metabase (`--org`, the default), by its owner o
 Binaries are for macOS and Linux (glibc), arm64 and x64. On Windows, use WSL.
 `share -h` lists every command.
 
+`share update` replaces the binary with the latest release (`--version <x.y.z>` for another
+one, `--check` to only report); it checks the download against `SHA256SUMS` first. When the
+server names a newer release, the CLI says so on stderr, at most once a day
+(`SHARE_NO_UPDATE_CHECK=1` turns it off; it is off under CI and when stderr is not a terminal).
+It never updates itself. A server with `CLI_MIN_VERSION` set stops older CLIs with a request to
+run `share update`.
+
 The config is `~/.config/shares/config` (mode 0600, written by `share login`). `SHARES_URL`,
 `SHARES_CONTENT_URL` and `SHARES_TOKEN` in the environment override it, for CI and agents.
 

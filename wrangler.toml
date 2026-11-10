@@ -33,6 +33,8 @@ ALLOWED_DOMAIN = "metabase.com"
 ADMIN_EMAIL = "bryan@metabase.com"
 # PUBLIC_SHARING = "1"  -- owners can mark a share public (`share --public`),
 # readable without login. Unset (default): off, the API refuses it.
+# CLI_MIN_VERSION = "0.3.0"  -- an older `share` CLI stops and asks for
+# `share update`. Unset (default): no minimum.
 
 # secrets (set via: bun x wrangler secret put <NAME>):
 #   GOOGLE_CLIENT_SECRET  -- from the Google OAuth client
@@ -93,3 +95,4 @@ APP_HOST = "app.shares.metabase.fyi"
 # admin: /_import, /_stats, /_audit, service tokens
 ADMIN_EMAIL = "tyler@metabase.com"
 # PUBLIC_SHARING is off here; set PUBLIC_SHARING = "1" to allow public shares
+# CLI_MIN_VERSION is unset here; set CLI_MIN_VERSION = "x.y.z" to stop older CLIs

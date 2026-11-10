@@ -32,6 +32,10 @@ Old mb-shares setup (`~/.config/mb-shares/env`, a token from `/_token` on
 mb-shares.escherize.workers.dev): run `share login` once. The new CLI
 still reads the old env file until then.
 
+`share X is out (you have Y): share update` on stderr: run `share update`
+(the user may need to approve it). `share Y is too old for this server: run
+share update` stops every command until you do.
+
 Agents and CI without a login use the environment instead of the config:
 `SHARES_URL=https://app.shares.metabase.fyi SHARES_TOKEN=shr_...`. An admin
 makes a scoped service token for them (see Service tokens).
@@ -63,6 +67,8 @@ share --local <url>[/file]       # url -> local path it was published from
 share views <url-or-slug>        # who viewed a share (email, count, last)
 share whoami                     # account of the saved token
 share logout                     # revoke this machine's token
+share update                     # replace the binary with the latest release
+share update --check             # only report whether a newer release is out
 share -h                         # full help
 ```
 
