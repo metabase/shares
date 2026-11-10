@@ -1,10 +1,10 @@
 import { mkdirSync, mkdtempSync, readFileSync, statSync, symlinkSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 import { loadConfig, parseConfig, updateConfig } from '../config'
 import { collect, defaultName, deslug, localCopy, mirror } from '../files'
-import { HELP, loginBase, parseArgs, setAttrs } from '../main'
+import { HELP, type Io, loginBase, main, parseArgs, setAttrs } from '../main'
 
 const tmp = () => mkdtempSync(join(tmpdir(), 'share-unit-'))
 
@@ -189,5 +189,53 @@ describe('mirror and --local', () => {
     mirror(m, 's-2', files, '/gone', false)
     expect(localCopy(m, 's-2/a.txt')).toBe(join(m, 's-2/a.txt'))
     expect(localCopy(m, 'nope')).toBeNull()
+  })
+})
+
+describe('publish from stdin with -f', () => {
+  afterEach(() => { vi.unstubAllGlobals() })
+
+  // a fake server that takes every blob; returns the requests as "METHOD path"
+  function run(argv: string[]) {
+    const reqs: string[] = []
+    const published: unknown[] = []
+    vi.stubGlobal('fetch', async (url: string, init: RequestInit) => {
+      const u = new URL(url)
+      reqs.push(`${init.method} ${u.pathname}`)
+      if (u.pathname === '/_blobs/missing') return new Response(String(init.body))
+      if (u.pathname.startsWith('/_publish/')) {
+        published.push(JSON.parse(String(init.body)))
+        return Response.json({ version: 1 })
+      }
+      return new Response('')
+    })
+    const home = tmp()
+    let stdout = ''
+    let stderr = ''
+    const io: Io = {
+      stdout: (s) => { stdout += typeof s === 'string' ? s : new TextDecoder().decode(s) },
+      stderr: (s) => { stderr += s },
+      stdin: async () => new TextEncoder().encode('hi\n'),
+      env: { HOME: home, SHARES_URL: 'https://app.test', SHARES_CONTENT_URL: 'https://c.test', SHARES_TOKEN: 't', MIRROR_DIR: join(home, 'm') },
+      cwd: home,
+    }
+    return main(argv, io).then((code) => ({ code, stdout, stderr, reqs, published }))
+  }
+
+  it('publishes stdin as one file named by -f when no slug is given', async () => {
+    const r = await run(['-f', 'hi.txt'])
+    expect(r.code).toBe(0)
+    expect(r.stdout).toMatch(/^https:\/\/c\.test\/hi-[a-z0-9]+\/\n$/)
+    expect(r.reqs).not.toContain('GET /_list')
+    const slug = r.stdout.trim().split('/').at(-2)
+    expect(r.reqs).toContain(`POST /_publish/${slug}`)
+    expect(r.published).toEqual([{ files: [{ path: 'hi.txt', sha256: expect.any(String) }] }])
+  })
+
+  it('gives a usage error for -e -f with no slug', async () => {
+    const r = await run(['-e', '-f', 'hi.txt'])
+    expect(r.code).toBe(2)
+    expect(r.stderr).toMatch(/-e needs the share to change/)
+    expect(r.reqs).toEqual([])
   })
 })
