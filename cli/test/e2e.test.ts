@@ -157,6 +157,15 @@ describe('share CLI against wrangler dev', () => {
     expect((await share(['-e', 'x.md', 'no-such-share-zz'])).stderr).toMatch(/no existing share/)
   })
 
+  it('publishes stdin with -f and no slug as a new share named for the file', async () => {
+    const r = await share(['-f', 'hi.txt'], { stdin: 'hi\n' })
+    expect(r.code).toBe(0)
+    expect(r.stdout.trim()).toMatch(new RegExp(`^${BASE}/hi-[a-z0-9]+/$`))
+    const slug = r.stdout.trim().split('/').at(-2)
+    expect((await share(['ls', slug!])).stdout.trim()).toBe('hi.txt')
+    expect((await share(['cat', `${slug}/hi.txt`])).stdout).toBe('hi\n')
+  })
+
   it('publishes into a collection, makes a share public, lists, shows views, removes', async () => {
     const p = JSON.parse((await share(['--json', '-p', '-c', 'e2e/run-1', '-t', 'Run 1', '-m', 'pr=7', 'x.md'])).stdout)
     expect(p.public).toBe(true)
