@@ -202,7 +202,20 @@ describe('share CLI against wrangler dev', () => {
     const s = await share(['set', p.url, '--org', '-t', '', '-c', 'e2e/set', '-m', 'k=v', '--json'])
     expect(JSON.parse(s.stdout)).toMatchObject({ slug: p.slug, visibility: 'org', title: null, collection: 'e2e/set', meta: { k: 'v' } })
     expect(await read(p.url, OTHER)).toContain('hello e2e')
-    expect((await share(['set', p.slug, '--no-collection'])).stdout).toMatch(/^slug\s+\S+\nvisibility\s+org \(anyone at Metabase\)\ntitle\s*\ncollection\s*\nmeta.k\s+v$/m)
+    expect((await share(['set', p.slug, '--no-collection'])).stdout).toMatch(/^slug\s+\S+\nvisibility\s+org \(anyone at Metabase\)\nlisted\s+true\ntitle\s*\ncollection\s*\nmeta.k\s+v$/m)
+    await share(['rm', p.slug])
+  })
+
+  it('publishes --unlisted: readable by link, in no list of others; set --listed undoes it', async () => {
+    const other = { SHARES_TOKEN: ADMIN_TOKEN, SHARES_URL: BASE }
+    const p = JSON.parse((await share(['--json', '--unlisted', 'x.md'])).stdout)
+    const info = JSON.parse((await share(['api', `shares/${p.slug}`])).stdout)
+    expect(info).toMatchObject({ visibility: 'org', listed: false })
+    expect((await fetch(local(p.url), { headers: { cookie: session(OTHER), accept: 'text/html' } })).status).toBe(200)
+    expect((await share([], { env: other })).stdout).not.toContain(p.slug)
+    expect((await share([])).stdout).toContain(p.slug)
+    expect((await share(['set', p.slug, '--listed'])).stdout).toMatch(/^listed\s+true$/m)
+    expect((await share([], { env: other })).stdout).toContain(p.slug)
     await share(['rm', p.slug])
   })
 

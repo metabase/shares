@@ -466,3 +466,137 @@ describe('service tokens and private shares', () => {
     expect(s.visibility).toBe('private')
   })
 })
+
+describe('unlisted shares', () => {
+  // ucol: SAM's listed share `seen` and PAT's unlisted org share `hid`;
+  // ucol2: only PAT's unlisted share `hid2`
+  let ucol: string, ucol2: string, seen: string, hid: string, hid2: string
+  beforeAll(async () => {
+    ucol = slug('ucol')
+    ucol2 = slug('ucol2')
+    seen = slug('unl-seen')
+    hid = slug('unl-hid')
+    hid2 = slug('unl-hid2')
+    expect((await commit(seen, { 'x.md': 'x' }, { collection: ucol }, samToken)).status).toBe(200)
+    expect((await commit(hid, { 'index.md': '# Quokkafish' }, { collection: ucol, listed: false, title: 'Quokkafish' }, patToken)).status).toBe(200)
+    expect((await commit(hid2, { 'x.md': 'x' }, { collection: ucol2, listed: false }, patToken)).status).toBe(200)
+  })
+
+  const slugs = async (q: string, token?: string) =>
+    (await (await api('GET', `/_api/shares?${q}`, { token })).json<ShareInfo[]>()).map((s) => s.slug)
+  const getCol = (c: string, token?: string) => api('GET', `/_api/collections/${c}`, { token })
+
+  it('is readable by link for every member, admin included', async () => {
+    for (const token of [samToken, patToken, undefined]) {
+      expect(await (await api('GET', `/${hid}/index.md`, { token })).text()).toBe('# Quokkafish')
+      const s = await (await api('GET', `/_api/shares/${hid}`, { token })).json<ShareInfo>()
+      expect(s).toMatchObject({ visibility: 'org', listed: false })
+    }
+    expect((await (await browser(SAM, CONTENT))(`/${hid}/`)).status).toBe(200)
+    expect((await (await browser(SAM, ORIGIN))(`/_s/${hid}`)).status).toBe(200)
+  })
+
+  it('is in the JSON lists and collection counts of its owner only', async () => {
+    expect(await slugs(`collection=${ucol}`, patToken)).toEqual(expect.arrayContaining([seen, hid]))
+    expect(await slugs(`collection=${ucol}`, samToken)).toEqual([seen])
+    expect(await slugs(`collection=${ucol}`)).toEqual([seen])
+    expect(await slugs('limit=1000')).not.toContain(hid)
+    expect(await slugs(`owner=${PAT}`)).not.toContain(hid)
+    expect(await slugs('', patToken)).toContain(hid)
+    expect((await (await getCol(ucol, patToken)).json<Collection>()).shares).toBe(2)
+    expect((await (await getCol(ucol, samToken)).json<Collection>()).shares).toBe(1)
+    expect((await (await getCol(ucol)).json<Collection>()).shares).toBe(1)
+  })
+
+  it('keeps a collection of only unlisted shares hidden from others', async () => {
+    for (const token of [samToken, undefined]) {
+      expect((await getCol(ucol2, token)).status).toBe(404)
+      expect(await (await api('GET', `/_api/collections?prefix=${ucol2}`, { token })).json()).toEqual([])
+    }
+    expect((await (await getCol(ucol2, patToken)).json<Collection>()).shares).toBe(1)
+  })
+
+  it('is in the bare _list of its owner only', async () => {
+    expect(await (await api('GET', '/_list')).text()).not.toContain(hid)
+    expect((await (await api('GET', '/_list', { token: patToken })).text()).split('\n')).toContain(hid)
+  })
+
+  it('web lists: /, /?q= and /?c=', async () => {
+    for (const [who, sees] of [[PAT, true], [SAM, false], [ADMIN, false]] as const) {
+      const b = await browser(who, ORIGIN)
+      for (const p of ['/', '/?q=quokkafish', `/?c=${ucol}`]) {
+        expect((await (await b(p)).text()).includes(`/${hid}/`), `${who} ${p}`).toBe(sees)
+      }
+    }
+  })
+
+  it('only the owner sets listed; changes are audited; a republish keeps it', async () => {
+    const a = slug('unl-set')
+    await commit(a, { 'x.md': 'x' }, {}, patToken)
+    const set = (listed: unknown, token?: string) => json(`/_api/shares/${a}`, { listed }, token)
+    expect((await set('no', patToken)).status).toBe(400)
+    expect((await set(false, undefined)).status).toBe(403)
+    expect((await set(false, samToken)).status).toBe(403)
+    expect((await (await set(false, patToken)).json<ShareInfo>()).listed).toBe(false)
+    await commit(a, { 'x.md': 'y' }, {}, patToken)
+    expect((await (await api('GET', `/_api/shares/${a}`, { token: patToken })).json<ShareInfo>()).listed).toBe(false)
+    expect((await (await set(true, patToken)).json<ShareInfo>()).listed).toBe(true)
+
+    const audit = (await (await api('GET', '/_audit?limit=1000')).text()).split('\n')
+      .filter((l) => l.endsWith(`\t${a}`)).map((l) => l.split('\t')[2])
+    expect(audit).toEqual(['share.listed', 'share.unlisted'])
+  })
+
+  it('a publish by admin or a service token onto the share of another owner cannot set listed', async () => {
+    const a = slug('unl-pub')
+    await commit(a, { 'x.md': 'x' }, { collection: 'svc/unl-pub' }, patToken)
+    expect((await commit(a, { 'x.md': 'y' }, { listed: false })).status).toBe(403)
+    expect((await api('PUT', `/${a}/x.md`, { body: 'z' })).status).toBe(200)
+    expect((await api('POST', `/_finalize/${a}?listed=0`, { body: 'x.md' })).status).toBe(403)
+    const agent = (await (await json('/_api/tokens', { name: 'unl-pub', scopes: ['write:svc/*'] })).json<ServiceTokenCreated>()).token
+    expect((await commit(a, { 'x.md': 'w' }, { listed: false }, agent)).status).toBe(403)
+    expect((await (await api('GET', `/_api/shares/${a}`, { token: patToken })).json<ShareInfo>()).listed).toBe(true)
+  })
+
+  it('a rename keeps it unlisted', async () => {
+    const a = slug('unl-ren')
+    await commit(a, { 'x.md': 'x' }, { listed: false }, patToken)
+    const to = `${a}-renamed`
+    expect((await (await browser(PAT, ORIGIN))(`/_s/${a}`, {
+      method: 'POST', headers: { origin: ORIGIN, 'content-type': 'application/x-www-form-urlencoded' }, body: `action=rename&to=${to}`,
+    })).status).toBe(303)
+    expect((await (await api('GET', `/_api/shares/${to}`, { token: patToken })).json<ShareInfo>()).listed).toBe(false)
+  })
+
+  it('the legacy finalize takes listed=0', async () => {
+    const b = slug('unl-legacy')
+    expect((await api('PUT', `/${b}/x.md`, { token: patToken, body: 'x' })).status).toBe(200)
+    expect((await api('POST', `/_finalize/${b}?listed=no`, { token: patToken, body: 'x.md' })).status).toBe(400)
+    expect((await api('POST', `/_finalize/${b}?listed=0`, { token: patToken, body: 'x.md' })).status).toBe(200)
+    expect((await (await api('GET', `/_api/shares/${b}`, { token: samToken })).json<ShareInfo>()).listed).toBe(false)
+  })
+
+  it('the share page form: owner only', async () => {
+    const a = slug('unl-form')
+    await commit(a, { 'x.md': 'x' }, {}, patToken)
+    const post = async (who: string, body: string) => (await browser(who, ORIGIN))(`/_s/${a}`, {
+      method: 'POST', headers: { origin: ORIGIN, 'content-type': 'application/x-www-form-urlencoded' }, body,
+    })
+    expect((await post(ADMIN, 'action=listed')).status).toBe(403)
+    expect((await post(PAT, 'action=listed')).status).toBe(303)
+    expect((await (await api('GET', `/_api/shares/${a}`, { token: patToken })).json<ShareInfo>()).listed).toBe(false)
+    expect((await post(PAT, 'action=listed&listed=1')).status).toBe(303)
+    expect((await (await api('GET', `/_api/shares/${a}`, { token: patToken })).json<ShareInfo>()).listed).toBe(true)
+  })
+
+  it('a service token unlists its own share, not the share of a person', async () => {
+    const svcCol = `svc/${slug('u')}`
+    const agent = (await (await json('/_api/tokens', { name: 'unl-agent', scopes: ['write:svc/*'] })).json<ServiceTokenCreated>()).token
+    const own = slug('unl-svc')
+    expect((await commit(own, { 'x.md': 'x' }, { collection: svcCol, listed: false }, agent)).status).toBe(200)
+    expect(await slugs(`collection=${svcCol}`, samToken)).toEqual([])
+    const person = slug('unl-svc-person')
+    await commit(person, { 'x.md': 'x' }, { collection: svcCol }, patToken)
+    expect((await json(`/_api/shares/${person}`, { listed: false }, agent)).status).toBe(403)
+  })
+})

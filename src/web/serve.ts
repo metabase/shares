@@ -89,9 +89,9 @@ export async function serve(url: URL, email: string | null, env: Env, store: Sha
       sorted = (await query.search(q, admin ? undefined : email!, email, 200)).map(summary)
     } else {
       // you see your shares; admin sees everyone's (with an owner column)
-      // but the private shares of others
+      // but the private and unlisted shares of others
       const mine = [...await store.shares()]
-        .filter(([, s]) => (s.o || env.ADMIN_EMAIL) === email || (admin && s.vis !== 'private'))
+        .filter(([, s]) => (s.o || env.ADMIN_EMAIL) === email || (admin && s.vis !== 'private' && !s.unlisted))
       // newest first; pre-timestamp shares (no metadata) sink to the bottom
       sorted = mine.sort((a, b) => b[1].t - a[1].t || a[0].localeCompare(b[0]))
     }

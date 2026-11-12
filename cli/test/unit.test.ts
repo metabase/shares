@@ -59,6 +59,13 @@ describe('share set', () => {
     expect(args).toEqual(['set', 'https://h/s-a3f2b/'])
     expect(setAttrs(opts)).toEqual({ visibility: 'org', title: 'T', collection: 'a/b', meta: { pr: '1' } })
     expect(setAttrs(parseArgs(['set', 's', '--private']).opts)).toEqual({ visibility: 'private' })
+    expect(setAttrs(parseArgs(['set', 's', '--unlisted']).opts)).toEqual({ listed: false })
+    expect(setAttrs(parseArgs(['set', 's', '--listed']).opts)).toEqual({ listed: true })
+  })
+
+  it('refuses --listed with --unlisted', () => {
+    expect(() => parseArgs(['--listed', '--unlisted', 'x.md'])).toThrow(/together/)
+    expect(parseArgs(['x.md']).opts.listed).toBeUndefined()
   })
 
   it('clears the title with -t "" and the collection with --no-collection', () => {

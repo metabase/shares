@@ -25,6 +25,11 @@ function finalizeAttrs(q: URLSearchParams): ShareAttrs | undefined {
   if (q.has('collection')) a.collection = q.get('collection')
   if (q.has('title')) a.title = q.get('title')
   if (q.has('visibility')) a.visibility = q.get('visibility') as Visibility
+  if (q.has('listed')) {
+    const l = q.get('listed')
+    if (l !== '1' && l !== '0') throw new StoreError(400, 'bad listed: 1 or 0')
+    a.listed = l === '1'
+  }
   const meta = q.getAll('meta')
   if (meta.length) {
     a.meta = {}
@@ -77,7 +82,7 @@ async function dispatch(req: Request, url: URL, env: Env, store: ShareStore, who
     // a share you may not read lists as a slug without files
     if (prefix) return lines(await readable(store, prefix.split('/')[0], who) ? await store.filesUnder(prefix) : [])
     return lines([...await store.shares()]
-      .filter(([, s]) => (s.o || env.ADMIN_EMAIL) === who || (admin && s.vis !== 'private'))
+      .filter(([, s]) => (s.o || env.ADMIN_EMAIL) === who || (admin && s.vis !== 'private' && !s.unlisted))
       .map(([top]) => top).sort())
   }
 
@@ -114,8 +119,10 @@ async function dispatch(req: Request, url: URL, env: Env, store: ShareStore, who
       let body: { files?: CommitFile[]; message?: string } & ShareAttrs
       try { body = await req.json() } catch { return new Response('bad json\n', { status: 400 }) }
       if (!Array.isArray(body.files)) return new Response('files missing\n', { status: 400 })
-      const { title, collection, meta, visibility } = body
-      const version = await store.commit(top, body.files, who, body.message, { title, collection, meta, visibility })
+      const { title, collection, meta, visibility, listed } = body
+      // admin publishes onto shares of others, but never sets whether they are listed
+      if (listed !== undefined && ((await store.owner(top)) ?? who) !== who) return new Response('only the owner sets listed\n', { status: 403 })
+      const version = await store.commit(top, body.files, who, body.message, { title, collection, meta, visibility, listed })
       return Response.json(publishResponse(url, env, top, version))
     }
     return new Response('not found\n', { status: 404 })
@@ -179,6 +186,7 @@ async function dispatch(req: Request, url: URL, env: Env, store: ShareStore, who
     if (!files.length) return new Response('empty manifest\n', { status: 400 })
     const attrs = finalizeAttrs(url.searchParams)
     if (attrs && !isQueryStore(store)) return new Response('attributes not supported\n', { status: 501 })
+    if (attrs?.listed !== undefined && (owner ?? who) !== who) return new Response('only the owner sets listed\n', { status: 403 })
     await store.finalize(top, files, owner || who, who, attrs)
     // push counter for /_stats: one finalize = one push
     await store.countPush(who)
