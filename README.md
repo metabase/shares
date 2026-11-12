@@ -39,6 +39,14 @@ server names a newer release, the CLI says so on stderr, at most once a day
 It never updates itself. A server with `CLI_MIN_VERSION` set stops older CLIs with a request to
 run `share update`.
 
+`share update` also refreshes an installed Claude Code skill
+(`~/.claude/skills/mb-shares/SKILL.md`, or under `$CLAUDE_CONFIG_DIR`) from `<app>/_skill`; with
+`--check` it only says whether the skill is current. It does not install a skill that is absent
+(it prints the install command) and leaves a symbolic link as it is. API answers carry
+`x-share-skill`, the sha256 of the served skill: when the installed skill differs, the CLI says so
+on stderr, at most once a day. This notice shows also when stderr is not a terminal, because its
+reader is often an agent; `SHARE_NO_UPDATE_CHECK=1` and CI turn it off.
+
 The config is `~/.config/shares/config` (mode 0600, written by `share login`). `SHARES_URL`,
 `SHARES_CONTENT_URL` and `SHARES_TOKEN` in the environment override it, for CI and agents.
 
@@ -51,6 +59,7 @@ curl -fsS https://app.shares.metabase.fyi/_skill -o ~/.claude/skills/mb-shares/S
 
 The source is [skill/SKILL.md](skill/SKILL.md); the worker serves it at `/_skill`. The skill
 keeps the name `mb-shares`, so the install replaces the skill of the old mb-shares worker.
+After the first install, `share update` keeps it current (see above).
 Agents use `--json` on any command: stdout is one JSON value, errors too.
 
 ## Agents and CI

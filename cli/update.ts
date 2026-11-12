@@ -4,7 +4,7 @@
 
 import { execFileSync } from 'node:child_process'
 import { createHash } from 'node:crypto'
-import { accessSync, chmodSync, constants, existsSync, mkdirSync, readFileSync, realpathSync, renameSync, rmSync, writeFileSync } from 'node:fs'
+import { accessSync, chmodSync, constants, existsSync, lstatSync, mkdirSync, readFileSync, realpathSync, renameSync, rmSync, writeFileSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { basename, dirname, join } from 'node:path'
 
@@ -34,6 +34,7 @@ export function compareVersions(a: string, b: string): number | null {
 export const isNewer = (latest: string, current: string) => compareVersions(latest, current) === 1
 
 export const stateFile = (env: Env) => join(env.HOME || homedir(), '.config/shares/update-check')
+export const skillStateFile = (env: Env) => join(env.HOME || homedir(), '.config/shares/skill-check')
 
 export interface NoticeIo {
   stderr: (s: string) => void
@@ -41,16 +42,9 @@ export interface NoticeIo {
   stderrIsTTY?: boolean
 }
 
-// One stderr line when the server names a newer release, at most once a day
-// (state: ~/.config/shares/update-check). Never on stdout. Off for a dev
-// build, with SHARE_NO_UPDATE_CHECK=1, under CI, and when stderr is not a
-// terminal. Returns true when it printed.
-export function updateNotice(latest: string | null, current: string, io: NoticeIo, now = Date.now()): boolean {
-  const { env } = io
-  if (!latest || current === 'dev' || !io.stderrIsTTY) return false
-  if (env.SHARE_NO_UPDATE_CHECK === '1' || env.CI) return false
-  if (!isNewer(latest, current)) return false
-  const path = stateFile(env)
+// True at most once a day for a state file (it holds the time of the last
+// true). A state file it cannot write does not stop it.
+function onceADay(path: string, now: number): boolean {
   try {
     const last = Number(readFileSync(path, 'utf8').trim())
     if (Number.isFinite(last) && now - last < DAY_MS && now >= last) return false
@@ -59,8 +53,78 @@ export function updateNotice(latest: string | null, current: string, io: NoticeI
     mkdirSync(dirname(path), { recursive: true })
     writeFileSync(path, `${now}\n`)
   } catch { /* read-only home: show the notice anyway */ }
+  return true
+}
+
+const checksOff = (env: Env) => env.SHARE_NO_UPDATE_CHECK === '1' || !!env.CI
+
+// One stderr line when the server names a newer release, at most once a day
+// (state: ~/.config/shares/update-check). Never on stdout. Off for a dev
+// build, with SHARE_NO_UPDATE_CHECK=1, under CI, and when stderr is not a
+// terminal. Returns true when it printed.
+export function updateNotice(latest: string | null, current: string, io: NoticeIo, now = Date.now()): boolean {
+  if (!latest || current === 'dev' || !io.stderrIsTTY || checksOff(io.env)) return false
+  if (!isNewer(latest, current) || !onceADay(stateFile(io.env), now)) return false
   io.stderr(`share ${latest} is out (you have ${current}): share update\n`)
   return true
+}
+
+// The installed Claude Code skill: $CLAUDE_CONFIG_DIR/skills/mb-shares/SKILL.md,
+// else ~/.claude/skills/mb-shares/SKILL.md.
+export function skillPath(env: Env) {
+  return join(env.CLAUDE_CONFIG_DIR || join(env.HOME || homedir(), '.claude'), 'skills/mb-shares/SKILL.md')
+}
+
+export const sha256Hex = (b: Uint8Array | string) => createHash('sha256').update(b).digest('hex')
+
+// the installed skill's sha256; null when there is none, 'linked' for a
+// symbolic link (a checkout keeps it current, so the CLI leaves it alone)
+export function installedSkillHash(env: Env): string | null {
+  const path = skillPath(env)
+  try {
+    if (lstatSync(path).isSymbolicLink()) return 'linked'
+    return sha256Hex(readFileSync(path))
+  } catch { return null }
+}
+
+// One stderr line when the installed skill differs from the one the server
+// serves (x-share-skill, its sha256), at most once a day (state:
+// ~/.config/shares/skill-check). Nothing when no skill is installed. Off
+// with SHARE_NO_UPDATE_CHECK=1 and under CI. Unlike updateNotice it also
+// prints when stderr is not a terminal: the skill's reader is an agent.
+export function skillNotice(served: string | null, io: NoticeIo, now = Date.now()): boolean {
+  if (!served || checksOff(io.env)) return false
+  const have = installedSkillHash(io.env)
+  if (!have || have === 'linked' || have === served.trim().toLowerCase()) return false
+  if (!onceADay(skillStateFile(io.env), now)) return false
+  io.stderr(`the mb-shares skill at ${skillPath(io.env)} is out of date: share update\n`)
+  return true
+}
+
+export const skillInstallCommand = (appUrl: string, path: string) =>
+  `mkdir -p ${dirname(path)} && curl -fsS ${appUrl}/_skill -o ${path}`
+
+export type SkillState = 'absent' | 'linked' | 'current' | 'stale' | 'updated'
+
+// Compare the installed skill with `served` (the text of <app>/_skill) and,
+// unless check, replace a stale one: a temp file in the same directory,
+// then a rename. Never creates a skill that is not installed, and never
+// writes through a symbolic link.
+export function refreshSkill(env: Env, served: Uint8Array, check: boolean): SkillState {
+  const path = skillPath(env)
+  const have = installedSkillHash(env)
+  if (!have) return 'absent'
+  if (have === 'linked') return 'linked'
+  if (have === sha256Hex(served)) return 'current'
+  if (check) return 'stale'
+  const tmp = join(dirname(path), `.SKILL.md.update-${process.pid}`)
+  try {
+    writeFileSync(tmp, served)
+    renameSync(tmp, path)
+  } finally {
+    rmSync(tmp, { force: true })
+  }
+  return 'updated'
 }
 
 // The message when the server needs a newer CLI; null when this one is ok.

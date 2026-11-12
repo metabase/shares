@@ -4,11 +4,10 @@ import {
   authenticate, setCookie, signEmail, ticketTag, verifyEmail,
 } from './auth'
 import { cli } from './api/cli'
-import { withCliHeaders } from './cli-version'
+import { skillResponse, withCliHeaders } from './cli-version'
 import { serviceApi } from './api/service'
 import { tokensApi } from './api/tokens'
 import CLI_SH from '../bin/share' // text module (wrangler.toml rules)
-import SKILL_MD from '../skill/SKILL.md'
 import INSTALL_SH from '../cli/install.sh'
 import { approvePath, deviceApi, formPost } from './web/tokens'
 import { serve } from './web/serve'
@@ -56,7 +55,7 @@ const installScript = (url: URL, env: Env) =>
 async function open(req: Request, url: URL, env: Env): Promise<Response | null> {
   if (req.method === 'GET' && !env.PUBLIC) {
     if (url.pathname === '/_cli') return new Response(CLI_SH)
-    if (url.pathname === '/_skill') return new Response(SKILL_MD)
+    if (url.pathname === '/_skill') return skillResponse()
     if (url.pathname === '/_install.sh') return installScript(url, env)
   }
   return deviceApi(req, url, env)

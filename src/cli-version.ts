@@ -1,12 +1,15 @@
 // Version headers on answers to the `share` CLI (bearer-token API):
 //   x-share-cli-latest  the newest CLI release; the CLI shows an update notice
 //   x-share-cli-min     var CLI_MIN_VERSION; an older CLI stops
+//   x-share-skill       sha256 (hex) of skill/SKILL.md, as /_skill serves it;
+//                       the CLI notes an installed skill that differs
 // The latest version comes from the GitHub latest-release redirect
 // (.../releases/latest -> .../releases/tag/cli-v<x.y.z>), kept in the Cache
 // API for 15 minutes. When GitHub fails, the header is absent: a CLI request
 // never fails because of it.
 
 import type { Env } from './env'
+import SKILL_MD from '../skill/SKILL.md' // text module (wrangler.toml rules)
 
 export const LATEST_URL = 'https://github.com/metabase/shares/releases/latest'
 // Cache API key; the host is never fetched
@@ -54,12 +57,25 @@ export async function latestCli(env: Env, ctx: ExecutionContext | undefined, fet
   return v
 }
 
+let skillSum: Promise<string> | undefined
+
+// the sha256 (hex) of the served skill, computed once per isolate
+export function skillHash(): Promise<string> {
+  skillSum ??= crypto.subtle.digest('SHA-256', new TextEncoder().encode(SKILL_MD)).then((d) =>
+    [...new Uint8Array(d)].map((b) => b.toString(16).padStart(2, '0')).join(''))
+  return skillSum
+}
+
+export async function skillResponse() {
+  return new Response(SKILL_MD, { headers: { 'content-type': 'text/plain;charset=UTF-8', 'x-share-skill': await skillHash() } })
+}
+
 export async function withCliHeaders(res: Response, env: Env, ctx: ExecutionContext | undefined, fetcher?: Fetcher) {
   const latest = await latestCli(env, ctx, fetcher)
   const min = env.CLI_MIN_VERSION && VERSION_RE.test(env.CLI_MIN_VERSION) ? env.CLI_MIN_VERSION : null
-  if (!latest && !min) return res
   // Response.redirect() has immutable headers
   const out = new Response(res.body, res)
+  out.headers.set('x-share-skill', await skillHash())
   if (latest) out.headers.set('x-share-cli-latest', latest)
   if (min) out.headers.set('x-share-cli-min', min)
   return out
