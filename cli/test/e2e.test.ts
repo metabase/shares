@@ -7,7 +7,7 @@
 
 import { spawn, spawnSync, type ChildProcess } from 'node:child_process'
 import { createHmac } from 'node:crypto'
-import { mkdirSync, mkdtempSync, readFileSync, realpathSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
@@ -244,6 +244,34 @@ describe('share CLI against wrangler dev', () => {
     expect(ls.map((x: { id: string }) => x.id)).toContain(t.id)
     await share(['token', 'revoke', t.id, '--service'], { env: admin })
     expect((await share(['whoami'], { env: bot })).code).toBe(1)
+  })
+
+  it('notes a stale installed skill once a day and refreshes it with share update', async () => {
+    const skillDir = join(HOME, '.claude/skills/mb-shares')
+    const path = join(skillDir, 'SKILL.md')
+    const served = await (await fetch(`${LOCAL}/_skill`)).text()
+    mkdirSync(skillDir, { recursive: true })
+    writeFileSync(path, '---\nname: mb-shares\n---\n\n# an old skill\n')
+    const a = await share(['--json'])
+    expect(a.code).toBe(0)
+    expect(a.stderr).toBe(`the mb-shares skill at ${path} is out of date: share update\n`)
+    expect((await share(['--json'])).stderr).toBe('')
+
+    // no release behind SHARE_RELEASE_URL: the binary step fails after the skill step
+    const noRelease = { SHARE_RELEASE_URL: `${BASE}/_no-release` }
+    const check = await share(['update', '--check', '--version', '0.0.1'], { env: noRelease })
+    expect(check.stdout).toContain(`the mb-shares skill at ${path} is out of date: share update`)
+    expect(readFileSync(path, 'utf8')).not.toBe(served)
+    const u = await share(['update'], { env: noRelease })
+    expect(u.stdout).toContain(`updated the mb-shares skill (${path})`)
+    expect(readFileSync(path, 'utf8')).toBe(served)
+    const again = await share(['update'], { env: noRelease })
+    expect(again.stdout).toContain(`the mb-shares skill is up to date (${path})`)
+
+    rmSync(skillDir, { recursive: true })
+    const absent = await share(['update'], { env: noRelease })
+    expect(absent.stdout).toContain(`no mb-shares skill at ${path}; to install it: mkdir -p ${skillDir} && curl -fsS ${BASE}/_skill -o ${path}`)
+    expect(existsSync(path)).toBe(false)
   })
 
   it('logs out: the token is revoked and removed from the config', async () => {

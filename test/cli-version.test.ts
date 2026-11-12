@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { env } from 'cloudflare:workers'
-import { CACHE_KEY, latestCli, withCliHeaders } from '../src/cli-version'
+import { CACHE_KEY, latestCli, skillHash, withCliHeaders } from '../src/cli-version'
 import { handle } from '../src/routes'
 import { ORIGIN } from './helpers'
 
@@ -66,5 +66,22 @@ describe('x-share-cli-min', () => {
   it('is absent without CLI_MIN_VERSION or with a malformed one', async () => {
     expect((await withCliHeaders(new Response('ok'), env, undefined)).headers.has('x-share-cli-min')).toBe(false)
     expect((await withCliHeaders(new Response('ok'), { ...env, CLI_MIN_VERSION: 'soon' }, undefined)).headers.has('x-share-cli-min')).toBe(false)
+  })
+})
+
+describe('x-share-skill', () => {
+  it('is the sha256 of the served skill, on /_skill and on bearer API answers', async () => {
+    const ctx = { waitUntil: () => {}, passThroughOnException: () => {} } as unknown as ExecutionContext
+    const skill = await handle(new Request(`${ORIGIN}/_skill`), env, ctx)
+    const body = await skill.text()
+    expect(body).toMatch(/^---\nname: mb-shares\n/)
+    const want = [...new Uint8Array(await crypto.subtle.digest('SHA-256', new TextEncoder().encode(body)))]
+      .map((b) => b.toString(16).padStart(2, '0')).join('')
+    expect(skill.headers.get('x-share-skill')).toBe(want)
+    expect(await skillHash()).toBe(want)
+    const authed = await handle(new Request(`${ORIGIN}/_list`, { headers: { authorization: `Bearer ${env.UPLOAD_TOKEN}` } }), env, ctx)
+    expect(authed.headers.get('x-share-skill')).toBe(want)
+    const page = await handle(new Request(`${ORIGIN}/`), env, ctx)
+    expect(page.headers.has('x-share-skill')).toBe(false)
   })
 })

@@ -14,8 +14,8 @@ import { DEFAULT_APP, loadConfig, updateConfig, type Config } from './config'
 import { collect, defaultName, deslug, localCopy, localPath, mirror, randomSuffix, readBytes, sha256, type LocalFile } from './files'
 import { client, HttpError, pool, sleep, UsageError, type Client } from './http'
 import {
-  binaryName, fetchBinary, installCommand, isNewer, latestRelease, NotWritable, releaseBase, replaceBinary, tagOf, tooOld,
-  updateNotice, writableTarget,
+  binaryName, fetchBinary, installCommand, isNewer, latestRelease, NotWritable, refreshSkill, releaseBase, replaceBinary,
+  skillInstallCommand, skillNotice, skillPath, type SkillState, tagOf, tooOld, updateNotice, writableTarget,
 } from './update'
 
 declare const SHARE_VERSION: string
@@ -48,7 +48,8 @@ export const HELP = `usage: share <file-or-dir> [name]        publish (new slug 
        share token revoke <id> [--service]  revoke a token
        share update [--check] [--version <x.y.z>]
                                          replace this binary with the latest release
-                                         (or that version); --check only reports
+                                         (or that version) and refresh an installed
+                                         Claude Code skill; --check only reports
        share                             list all shares
 
 publish and set options:
@@ -100,7 +101,9 @@ Config: ~/.config/shares/config (mode 0600), written by \`share login\`.
 SHARES_URL, SHARES_CONTENT_URL and SHARES_TOKEN in the environment override it.
 When the server names a newer release, one line on stderr says so, at most
 once a day; SHARE_NO_UPDATE_CHECK=1 turns it off (off too under CI and when
-stderr is not a terminal).
+stderr is not a terminal). An installed Claude Code skill
+(~/.claude/skills/mb-shares/SKILL.md) that differs from the server's gets a
+stderr line too, at most once a day (also when stderr is not a terminal).
 `
 
 const COMMANDS = new Set(['login', 'logout', 'whoami', 'rm', 'ls', 'cat', 'download', 'views', 'log', 'public', 'set', 'api', 'local', 'help', 'version', 'token', 'update'])
@@ -234,6 +237,7 @@ class Ctx {
   // set for the ALWAYS commands: no too-old stop
   allowOld = false
   private noticed = false
+  private skillNoticed = false
 
   constructor(readonly io: Io, readonly opts: Opts, readonly cfg: Config) {}
 
@@ -242,7 +246,11 @@ class Ctx {
     const old = tooOld(res.headers.get('x-share-cli-min'), VERSION)
     if (old && !this.allowOld) throw new Error(old)
     if (!this.noticed) this.noticed = updateNotice(res.headers.get('x-share-cli-latest'), VERSION, this.io)
+    if (!this.skillNoticed) this.skillNoticed = skillNotice(res.headers.get('x-share-skill'), this.io)
   }
+
+  // the app URL for files anyone may fetch (/_skill, /install.sh)
+  get appUrl() { return (this.cfg.legacy ? undefined : this.cfg.baseUrl) || DEFAULT_APP }
 
   // human output; --json prints only the final value
   say(s: string) { if (!this.opts.json) this.io.stdout(s.endsWith('\n') ? s : s + '\n') }
@@ -488,10 +496,39 @@ async function token(ctx: Ctx, a: string[]) {
   }
 }
 
-// share update [--check] [--version <x.y.z>]: the release binary for this
-// machine, checked against SHA256SUMS, renamed over the running binary
+// The installed skill against <app>/_skill: refreshed, or with --check
+// only compared. A failure is a stderr note: the binary update goes on.
+async function updateSkill(ctx: Ctx): Promise<{ state: SkillState | 'error'; path: string }> {
+  const path = skillPath(ctx.io.env)
+  let state: SkillState
+  try {
+    const res = await client(ctx.appUrl).request('GET', '/_skill', { auth: false })
+    const body = new Uint8Array(await res.arrayBuffer())
+    if (!res.ok) throw new Error(`GET ${ctx.appUrl}/_skill: ${res.status}`)
+    if (!/^---\r?\nname: mb-shares\b/.test(new TextDecoder().decode(body.slice(0, 64)))) {
+      throw new Error(`GET ${ctx.appUrl}/_skill is not the mb-shares skill`)
+    }
+    state = refreshSkill(ctx.io.env, body, ctx.opts.check)
+  } catch (e) {
+    ctx.note(`share: cannot check the mb-shares skill: ${(e as Error).message}`)
+    return { state: 'error', path }
+  }
+  ctx.say({
+    absent: `no mb-shares skill at ${path}; to install it: ${skillInstallCommand(ctx.appUrl, path)}`,
+    linked: `the mb-shares skill at ${path} is a symbolic link; left as it is`,
+    current: `the mb-shares skill is up to date (${path})`,
+    stale: `the mb-shares skill at ${path} is out of date: share update`,
+    updated: `updated the mb-shares skill (${path})`,
+  }[state])
+  return { state, path }
+}
+
+// share update [--check] [--version <x.y.z>]: the installed skill first, then
+// the release binary for this machine, checked against SHA256SUMS, renamed
+// over the running binary
 async function update(ctx: Ctx) {
   const { env } = ctx.io
+  const skill = await updateSkill(ctx)
   if (VERSION === 'dev') throw new Error('this is a dev build (not a release binary); it does not update itself. Install a release: curl -fsSL <app>/install.sh | sh')
   const want = ctx.opts.updateVersion !== undefined ? tagOf(ctx.opts.updateVersion).version : undefined
   // SHARE_RELEASE_URL (tests, mirrors) holds files only, no version to compare
@@ -500,21 +537,20 @@ async function update(ctx: Ctx) {
     if (!target) throw new Error('SHARE_RELEASE_URL is set: no latest version to compare (give --version)')
     const newer = isNewer(target, VERSION)
     ctx.say(newer ? `share ${target} is out (you have ${VERSION}): share update` : `share ${VERSION} is up to date (latest ${target})`)
-    ctx.emit({ current: VERSION, latest: target, update: newer })
+    ctx.emit({ current: VERSION, latest: target, update: newer, skill })
     return
   }
   const path = ctx.io.execPath ?? process.execPath
   if (target && target === VERSION) {
     ctx.say(`share ${VERSION} is up to date`)
-    ctx.emit({ current: VERSION, latest: target, updated: false, path })
+    ctx.emit({ current: VERSION, latest: target, updated: false, path, skill })
     return
   }
   const name = binaryName(env)
   const base = releaseBase(env, want)
   const notWritable = (e: unknown) => {
     if (!(e instanceof NotWritable)) return e
-    const app = (ctx.cfg.legacy ? undefined : ctx.cfg.baseUrl) || DEFAULT_APP
-    return new Error(`${e.message}; run:\n  ${installCommand(app, e.dir, want && tagOf(want).tag)}`)
+    return new Error(`${e.message}; run:\n  ${installCommand(ctx.appUrl, e.dir, want && tagOf(want).tag)}`)
   }
   try { writableTarget(path) } catch (e) { throw notWritable(e) }
   if (!ctx.opts.json) ctx.note(`downloading ${base}/${name}`)
@@ -522,7 +558,7 @@ async function update(ctx: Ctx) {
   let got: string
   try { got = replaceBinary(path, bin) } catch (e) { throw notWritable(e) }
   ctx.say(`updated share ${VERSION} -> ${got} (${path})`)
-  ctx.emit({ current: VERSION, latest: got, updated: true, path })
+  ctx.emit({ current: VERSION, latest: got, updated: true, path, skill })
 }
 
 async function list(ctx: Ctx) {

@@ -12,7 +12,8 @@ Google account; the CLI uses a bearer token. URLs are safe to paste anywhere
 
 - Share links: `https://shares.metabase.fyi/<slug>/` (content host: user files only)
 - App: `https://app.shares.metabase.fyi` (API, login, tokens, share list and search)
-- This skill: served at `<app>/_skill`. Update it with
+- This skill: served at `<app>/_skill`. `share update` refreshes an installed copy
+  (`share update --check` only reports). First install:
   `mkdir -p ~/.claude/skills/mb-shares && curl -fsS https://app.shares.metabase.fyi/_skill -o ~/.claude/skills/mb-shares/SKILL.md`
 
 ## Setup
@@ -32,9 +33,11 @@ Old mb-shares setup (`~/.config/mb-shares/env`, a token from `/_token` on
 mb-shares.escherize.workers.dev): run `share login` once. The new CLI
 still reads the old env file until then.
 
-`share X is out (you have Y): share update` on stderr: run `share update`
-(the user may need to approve it). `share Y is too old for this server: run
-share update` stops every command until you do.
+`share X is out (you have Y): share update` or `the mb-shares skill at
+<path> is out of date: share update` on stderr: run `share update` (the user
+may need to approve it); it replaces the binary and this skill. After a skill
+refresh, read the new skill again before you go on. `share Y is too old for
+this server: run share update` stops every command until you do.
 
 Agents and CI without a login use the environment instead of the config:
 `SHARES_URL=https://app.shares.metabase.fyi SHARES_TOKEN=shr_...`. An admin

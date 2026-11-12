@@ -1,17 +1,29 @@
 import { createHash } from 'node:crypto'
 import { createServer, type Server } from 'node:http'
-import { chmodSync, existsSync, mkdtempSync, readdirSync, readFileSync, realpathSync, statSync, writeFileSync } from 'node:fs'
+import { chmodSync, existsSync, lstatSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, statSync, symlinkSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import type { AddressInfo } from 'node:net'
 import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from 'vitest'
 import { type Io, main, parseArgs, VERSION } from '../main'
 import {
-  binaryName, compareVersions, expectedSum, installCommand, releaseBase, stateFile, tooOld, updateNotice,
+  binaryName, compareVersions, expectedSum, installCommand, releaseBase, sha256Hex, skillNotice, skillPath, skillStateFile,
+  stateFile, tooOld, updateNotice,
 } from '../update'
 
 const tmp = () => mkdtempSync(join(tmpdir(), 'share-update-'))
 const DAY = 24 * 60 * 60 * 1000
+
+const SERVED_SKILL = '---\nname: mb-shares\ndescription: test\n---\n\n# new skill\n'
+const OLD_SKILL = '---\nname: mb-shares\ndescription: test\n---\n\n# old skill\n'
+
+// a skill installed under home; returns its path
+function installSkill(home: string, text: string) {
+  const path = skillPath({ HOME: home })
+  mkdirSync(join(path, '..'), { recursive: true })
+  writeFileSync(path, text)
+  return path
+}
 
 describe('compareVersions', () => {
   it('orders versions by number, a prerelease before its release', () => {
@@ -61,6 +73,57 @@ describe('updateNotice', () => {
       expect(updateNotice('0.3.0', version, i)).toBe(false)
       expect(existsSync(stateFile(i.env))).toBe(false)
     }
+  })
+})
+
+describe('skillNotice', () => {
+  const io = (env: Record<string, string> = {}, tty = false) => {
+    const out = { stderr: '', home: tmp() }
+    return { out, io: { stderr: (s: string) => { out.stderr += s }, env: { HOME: out.home, ...env }, stderrIsTTY: tty } }
+  }
+  const served = sha256Hex(SERVED_SKILL)
+
+  it('prints one stderr line for an installed skill that differs, then not again for a day', () => {
+    const { out, io: i } = io()
+    const path = installSkill(out.home, OLD_SKILL)
+    const now = Date.now()
+    expect(skillNotice(served, i, now)).toBe(true)
+    expect(out.stderr).toBe(`the mb-shares skill at ${path} is out of date: share update\n`)
+    expect(readFileSync(skillStateFile(i.env), 'utf8').trim()).toBe(String(now))
+    expect(skillNotice(served, i, now + DAY - 1)).toBe(false)
+    expect(skillNotice(served, i, now + DAY)).toBe(true)
+    expect(out.stderr.split('\n').filter(Boolean)).toHaveLength(2)
+  })
+
+  it('prints nothing for a current skill, no installed skill, a symbolic link or no header', () => {
+    const current = io()
+    installSkill(current.out.home, SERVED_SKILL)
+    expect(skillNotice(served, current.io)).toBe(false)
+    expect(skillNotice(served, io().io)).toBe(false)
+    const linked = io()
+    const target = join(tmp(), 'SKILL.md')
+    writeFileSync(target, OLD_SKILL)
+    const path = skillPath(linked.io.env)
+    mkdirSync(join(path, '..'), { recursive: true })
+    symlinkSync(target, path)
+    expect(skillNotice(served, linked.io)).toBe(false)
+    const none = io()
+    installSkill(none.out.home, OLD_SKILL)
+    expect(skillNotice(null, none.io)).toBe(false)
+    for (const x of [current, linked, none]) expect(x.out.stderr).toBe('')
+  })
+
+  it('is off with SHARE_NO_UPDATE_CHECK=1 and under CI', () => {
+    for (const { out, io: i } of [io({ SHARE_NO_UPDATE_CHECK: '1' }), io({ CI: 'true' })]) {
+      installSkill(out.home, OLD_SKILL)
+      expect(skillNotice(served, i)).toBe(false)
+      expect(existsSync(skillStateFile(i.env))).toBe(false)
+    }
+  })
+
+  it('reads the skill under CLAUDE_CONFIG_DIR when it is set', () => {
+    expect(skillPath({ HOME: '/h', CLAUDE_CONFIG_DIR: '/c' })).toBe('/c/skills/mb-shares/SKILL.md')
+    expect(skillPath({ HOME: '/h' })).toBe('/h/.claude/skills/mb-shares/SKILL.md')
   })
 })
 
@@ -117,6 +180,7 @@ describe('share against version headers and a release directory', () => {
   const rel: Record<string, Buffer> = {}
   const name = binaryName({})
   const requests: string[] = []
+  const skill = { status: 200, body: SERVED_SKILL }
 
   beforeAll(async () => {
     server = createServer((req, res) => {
@@ -124,6 +188,10 @@ describe('share against version headers and a release directory', () => {
       if (req.url?.startsWith('/rel/')) {
         const f = rel[req.url.slice(5)]
         res.writeHead(f ? 200 : 404).end(f ?? 'not found')
+        return
+      }
+      if (req.url === '/_skill') {
+        res.writeHead(skill.status).end(skill.body)
         return
       }
       res.writeHead(200, headers).end(req.url === '/_list' ? 'a-1\n' : '')
@@ -135,6 +203,7 @@ describe('share against version headers and a release directory', () => {
   afterEach(() => {
     for (const k of Object.keys(headers)) delete headers[k]
     requests.length = 0
+    Object.assign(skill, { status: 200, body: SERVED_SKILL })
   })
 
   function release(script: string, sum?: string) {
@@ -199,11 +268,13 @@ describe('share against version headers and a release directory', () => {
     const r = await run(['update', '--json'], { execPath: path })
     expect(r.stderr).toBe('')
     expect(r.code).toBe(0)
-    expect(JSON.parse(r.stdout)).toEqual({ current: '0.2.0', latest: '9.9.9', updated: true, path })
+    expect(JSON.parse(r.stdout)).toEqual({
+      current: '0.2.0', latest: '9.9.9', updated: true, path, skill: { state: 'absent', path: skillPath({ HOME: r.home }) },
+    })
     expect(readFileSync(path, 'utf8')).toContain('share 9.9.9')
     expect(statSync(path).mode & 0o777).toBe(0o755)
     expect(readdirSync(dir)).toEqual(['share'])
-    expect(requests).toEqual([`GET /rel/${name}`, 'GET /rel/SHA256SUMS'])
+    expect(requests).toEqual(['GET /_skill', `GET /rel/${name}`, 'GET /rel/SHA256SUMS'])
   })
 
   it('refuses a checksum mismatch and leaves the binary as it was', async () => {
@@ -236,7 +307,7 @@ describe('share against version headers and a release directory', () => {
       const r = await run(['update', '--version', '0.4.0'], { execPath: path })
       expect(r.code).toBe(1)
       expect(r.stderr).toContain(`cannot write to ${dir}`)
-      expect(requests).toEqual([])
+      expect(requests).toEqual(['GET /_skill'])
       expect(r.stderr).toContain(`install.sh | sudo env SHARE_INSTALL_DIR=${dir} SHARE_VERSION=cli-v0.4.0 sh`)
     } finally {
       chmodSync(dir, 0o755)
@@ -247,16 +318,21 @@ describe('share against version headers and a release directory', () => {
     const { path } = installed()
     const r = await run(['update', '--check', '--version', '0.3.0'], { execPath: path })
     expect(r.code).toBe(0)
-    expect(r.stdout).toBe('share 0.3.0 is out (you have 0.2.0): share update\n')
+    expect(r.stdout).toBe(`no mb-shares skill at ${skillPath({ HOME: r.home })}; to install it: `
+      + `mkdir -p ${join(r.home, '.claude/skills/mb-shares')} && curl -fsS ${base}/_skill -o ${skillPath({ HOME: r.home })}\n`
+      + 'share 0.3.0 is out (you have 0.2.0): share update\n')
     const same = await run(['update', '--check', '--version', '0.2.0', '--json'], { execPath: path })
-    expect(JSON.parse(same.stdout)).toEqual({ current: '0.2.0', latest: '0.2.0', update: false })
-    expect(requests).toEqual([])
+    expect(JSON.parse(same.stdout)).toEqual({
+      current: '0.2.0', latest: '0.2.0', update: false, skill: { state: 'absent', path: skillPath({ HOME: same.home }) },
+    })
+    expect(requests).toEqual(['GET /_skill', 'GET /_skill'])
+    expect(existsSync(skillPath({ HOME: r.home }))).toBe(false)
   })
 
   it('asks GitHub for the latest release without SHARE_RELEASE_URL', async () => {
-    const spy = vi.spyOn(globalThis, 'fetch').mockResolvedValue(new Response(null, {
-      status: 302, headers: { location: 'https://github.com/metabase/shares/releases/tag/cli-v0.2.0' },
-    }))
+    const spy = vi.spyOn(globalThis, 'fetch').mockImplementation(async (u) => String(u).endsWith('/_skill')
+      ? new Response(SERVED_SKILL)
+      : new Response(null, { status: 302, headers: { location: 'https://github.com/metabase/shares/releases/tag/cli-v0.2.0' } }))
     try {
       const r = await run(['update', '--json'], { env: { SHARE_RELEASE_URL: '' }, execPath: installed().path })
       expect(JSON.parse(r.stdout)).toMatchObject({ current: '0.2.0', latest: '0.2.0', updated: false })
@@ -264,5 +340,70 @@ describe('share against version headers and a release directory', () => {
     } finally {
       spy.mockRestore()
     }
+  })
+
+  it('replaces a stale installed skill on update, and leaves a current one as it is', async () => {
+    release('#!/bin/sh\necho "share 9.9.9"\n')
+    const home = tmp()
+    const path = installSkill(home, OLD_SKILL)
+    const r = await run(['update', '--json'], { execPath: installed().path, home })
+    expect(r.code).toBe(0)
+    expect(JSON.parse(r.stdout).skill).toEqual({ state: 'updated', path })
+    expect(readFileSync(path, 'utf8')).toBe(SERVED_SKILL)
+    expect(readdirSync(join(path, '..'))).toEqual(['SKILL.md'])
+
+    const before = statSync(path).mtimeMs
+    const again = await run(['update', '--version', '0.2.0'], { execPath: installed().path, home })
+    expect(again.stdout).toBe(`the mb-shares skill is up to date (${path})\nshare 0.2.0 is up to date\n`)
+    expect(statSync(path).mtimeMs).toBe(before)
+    expect(readFileSync(path, 'utf8')).toBe(SERVED_SKILL)
+  })
+
+  it('reports a stale skill with --check and changes nothing', async () => {
+    const home = tmp()
+    const path = installSkill(home, OLD_SKILL)
+    const r = await run(['update', '--check', '--version', '0.2.0', '--json'], { execPath: installed().path, home })
+    expect(JSON.parse(r.stdout)).toMatchObject({ update: false, skill: { state: 'stale', path } })
+    expect(readFileSync(path, 'utf8')).toBe(OLD_SKILL)
+  })
+
+  it('leaves a symbolic link to a skill as it is', async () => {
+    const home = tmp()
+    const target = join(tmp(), 'SKILL.md')
+    writeFileSync(target, OLD_SKILL)
+    const path = skillPath({ HOME: home })
+    mkdirSync(join(path, '..'), { recursive: true })
+    symlinkSync(target, path)
+    const r = await run(['update', '--version', '0.2.0', '--json'], { execPath: installed().path, home })
+    expect(JSON.parse(r.stdout).skill).toEqual({ state: 'linked', path })
+    expect(lstatSync(path).isSymbolicLink()).toBe(true)
+    expect(readFileSync(target, 'utf8')).toBe(OLD_SKILL)
+  })
+
+  it('goes on with the binary when the skill cannot be fetched, and keeps the old skill', async () => {
+    for (const s of [{ status: 404, body: 'not found' }, { status: 200, body: '<html>login</html>' }]) {
+      Object.assign(skill, s)
+      const home = tmp()
+      const path = installSkill(home, OLD_SKILL)
+      const r = await run(['update', '--version', '0.2.0', '--json'], { execPath: installed().path, home })
+      expect(r.code).toBe(0)
+      expect(r.stderr).toMatch(/^share: cannot check the mb-shares skill: GET .*\/_skill/)
+      expect(JSON.parse(r.stdout)).toMatchObject({ updated: false, skill: { state: 'error', path } })
+      expect(readFileSync(path, 'utf8')).toBe(OLD_SKILL)
+    }
+  })
+
+  it('shows the stale skill notice on stderr once a day, also when stderr is not a terminal', async () => {
+    headers['x-share-skill'] = sha256Hex(SERVED_SKILL)
+    const home = tmp()
+    const path = installSkill(home, OLD_SKILL)
+    const a = await run(['--json'], { home, tty: false })
+    expect(a.code).toBe(0)
+    expect(a.stdout).toBe('["a-1"]\n')
+    expect(a.stderr).toBe(`the mb-shares skill at ${path} is out of date: share update\n`)
+    const b = await run(['--json'], { home, tty: false })
+    expect(b.stderr).toBe('')
+    const c = await run(['--json'], { home: (() => { const h = tmp(); installSkill(h, SERVED_SKILL); return h })(), tty: false })
+    expect(c.stderr).toBe('')
   })
 })
