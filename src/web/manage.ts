@@ -84,6 +84,7 @@ ${detail ? `<p class="sub"><a href="${self}">Live files</a></p>${detail}` : live
 <dl class="strip">
 <div><dt>Owner</dt><dd>${person(share.owner, true)}</dd></div>
 <div><dt>Access</dt><dd>${ACCESS[liveVis(share, env)]}</dd></div>
+<div><dt>Listed</dt><dd>${share.listed ? 'Yes' : 'No, link only'}</dd></div>
 <div><dt>Collection</dt><dd>${share.collection ? `<a href="/?c=${encodeURIComponent(share.collection)}">${esc(share.collection)}</a>` : '—'}</dd></div>
 <div><dt>Live version</dt><dd>v${share.version}, ${n} file${n === 1 ? '' : 's'}, ${bytes(share.totalBytes)}</dd></div>
 <div><dt>Updated</dt><dd>${when(share.updatedAt)}</dd></div>
@@ -266,6 +267,8 @@ function manageForms(share: ShareInfo, self: string, email: string, env: Env, co
   return `<h2>Settings</h2>
 <div class="frm">
 ${accessForm(share, email, env, form)}
+${owner ? form('listed', `<label><input type="checkbox" name="listed" value="1"${share.listed ? ' checked' : ''}>Listed</label>
+<button>Save</button><p class="hint">Unlisted: only you see it in lists, search and collections. People you send the link to can still open it.</p>`) : ''}
 ${form('title', `<label>Title<input name="title" value="${esc(share.title ?? '')}" maxlength="500" placeholder="${esc(share.slug)}"></label>
 <button class="pri">Save</button><p class="hint">An empty title shows the slug.</p>`)}
 ${movePicker(share, self, collections)}
@@ -399,6 +402,10 @@ export async function managePost(req: Request, url: URL, env: Env, store: ShareS
         await store.setAttrs(slug, { visibility: v }, email)
         return back()
       }
+      case 'listed':
+        if (share.owner !== email) return message('Forbidden', 'Only the owner sets this.', 403)
+        await store.setAttrs(slug, { listed: field('listed') === '1' }, email)
+        return back()
       case 'move': {
         const to = (field('new') || field('collection')).toLowerCase().replace(/^\/+|\/+$/g, '') || null
         await store.setAttrs(slug, { collection: to }, email)

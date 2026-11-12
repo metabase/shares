@@ -61,10 +61,11 @@ export async function jsonApi(req: Request, url: URL, key: string, env: Env, sto
         if (share.owner !== who && !admin) return error(403, `owned by ${share.owner}`)
         const attrs = await body<ShareAttrs>(req)
         // admin changes the visibility of another owner's share only from
-        // public to org
+        // public to org, and never whether it is listed
         if (share.owner !== who && attrs?.visibility !== undefined && attrs.visibility !== 'org') {
           return error(403, 'only the owner sets this visibility')
         }
+        if (share.owner !== who && attrs?.listed !== undefined) return error(403, 'only the owner sets listed')
         await store.setAttrs(slug, attrs, who)
         return Response.json(await store.share(slug))
       }

@@ -100,8 +100,9 @@ async function dispatch(req: Request, url: URL, env: Env, store: ShareStore & Qu
     const share = await store.share(top)
     const collection = b.collection === undefined ? share?.collection : b.collection
     if (!can('write', collection) || (share && !can('write', share.collection))) return outOfScope()
-    const { title, meta, visibility } = b
-    const version = await store.commit!(top, b.files, who.agent, b.message, { title, collection, meta, visibility }, who.email)
+    const { title, meta, visibility, listed } = b
+    if (listed !== undefined && a && a.owner !== viewer) return error(403, 'only the owner sets listed')
+    const version = await store.commit!(top, b.files, who.agent, b.message, { title, collection, meta, visibility, listed }, who.email)
     return Response.json(publishResponse(url, env, top, version))
   }
 
@@ -146,8 +147,9 @@ async function dispatch(req: Request, url: URL, env: Env, store: ShareStore & Qu
       if (!can('write', share.collection)
         || (attrs.collection !== undefined && !can('write', attrs.collection))) return outOfScope()
       checkVisibility(attrs)
-      // only the owner changes who can read a share
+      // only the owner changes who can read or find a share
       if (attrs.visibility !== undefined && share.owner !== viewer) return error(403, 'only the owner sets the visibility')
+      if (attrs.listed !== undefined && share.owner !== viewer) return error(403, 'only the owner sets listed')
       await store.setAttrs(slug, attrs, who.agent)
       return Response.json(await store.share(slug))
     }

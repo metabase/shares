@@ -38,8 +38,8 @@ export const HELP = `usage: share <file-or-dir> [name]        publish (new slug 
        share login [app-url]             approve a new token in the browser, save it
        share logout                      revoke this machine's token
        share whoami                      the account of the saved token
-       share set <url-or-slug> [--private|--org|--public] [-t <title>] [-c <slug>|--no-collection] [-m k=v]...
-                                         change who can read a share, its title, collection or metadata
+       share set <url-or-slug> [--private|--org|--public] [--unlisted|--listed] [-t <title>] [-c <slug>|--no-collection] [-m k=v]...
+                                         change who can read or find a share, its title, collection or metadata
        share public <url-or-slug> on|off  same as \`share set --public\` / \`--org\` (off keeps a private share private)
        share api <path>                  GET /_api/<path> as JSON (collections, shares, versions)
        share token ls [--service]        your CLI tokens (admin, --service: service tokens)
@@ -55,13 +55,16 @@ publish and set options:
       --private             only you can read it (also hides it from lists of others)
       --org                 anyone at Metabase with a login can read it (the default)
   -p, --public              anyone with the link, no login (only if the server allows it)
+      --unlisted            readable as above with the link, but left out of the lists,
+                            search and collections of others (admin included)
+      --listed              undo --unlisted (the default)
   -c, --collection <slug>   publish into a collection (made if missing)
       --no-collection       take the share out of its collection
   -t, --title <text>        share title (set: -t '' clears it)
   -m, --meta <key=value>    share metadata, repeatable
       --message <text>      version message (shown by \`share log\`)
-A new share is --org unless you give --private or --public. A republish (-e)
-without one of them keeps the share's visibility.
+A new share is --org and listed unless you say otherwise. A republish (-e)
+without these flags keeps the share's visibility and listing.
 token options:
       --scope <scope>       read:<collection> or write:<collection>, a trailing *
                             matches any rest (write:metareview/*); repeatable
@@ -77,6 +80,7 @@ examples:
   share ./dir cool-name            custom name (still gets random suffix)
   share --private notes.md         only you can open the link
   share set notes-a3f2b --org      now anyone at Metabase can
+  share --unlisted notes.md        anyone at Metabase with the link; in no one else's lists
   share -x report.md standup       exact memorable URL: /standup/ (guessable!)
   pbpaste | share -f slides.html   stdin; .html/.md becomes the share's index
   share -e ./dir cool-name-a3f2b   overwrite existing share, same URL
@@ -115,6 +119,7 @@ export interface Opts {
   edit: boolean
   exact: boolean
   visibility?: Visibility
+  listed?: boolean
   filename?: string
   collection?: string
   noCollection: boolean
@@ -164,6 +169,12 @@ export function parseArgs(argv: string[]): { opts: Opts; args: string[] } {
       case '-p': case '--public': vis('public', a); break
       case '--private': vis('private', a); break
       case '--org': vis('org', a); break
+      case '--listed': case '--unlisted': {
+        const l = a === '--listed'
+        if (opts.listed !== undefined && opts.listed !== l) throw new UsageError('--listed and --unlisted together: give one')
+        opts.listed = l
+        break
+      }
       case '--no-collection': opts.noCollection = true; break
       case '-h': case '--help': args.unshift('help'); break
       // `share update --version <x.y.z>` names a release; elsewhere it prints the version
@@ -207,12 +218,13 @@ export function parseArgs(argv: string[]): { opts: Opts; args: string[] } {
 export function setAttrs(opts: Opts): ShareAttrs {
   const a: ShareAttrs = {
     ...(opts.visibility !== undefined && { visibility: opts.visibility }),
+    ...(opts.listed !== undefined && { listed: opts.listed }),
     ...(opts.title !== undefined && { title: opts.title || null }),
     ...(opts.collection !== undefined && { collection: opts.collection }),
     ...(opts.noCollection && { collection: null }),
     ...(Object.keys(opts.meta).length && { meta: opts.meta }),
   }
-  if (!Object.keys(a).length) throw new UsageError('share set: nothing to change (--private, --org, --public, -t, -c, --no-collection, -m)')
+  if (!Object.keys(a).length) throw new UsageError('share set: nothing to change (--private, --org, --public, --unlisted, --listed, -t, -c, --no-collection, -m)')
   return a
 }
 
@@ -368,14 +380,17 @@ async function run(ctx: Ctx, cmd: string, a: string[]) {
       return
     }
     case 'set': {
-      const slug = deslug(need(a[0], 'share set <url-or-slug> [--private|--org|--public] [-t <title>] [-c <slug>|--no-collection] [-m k=v]...'))
+      const slug = deslug(need(a[0], 'share set <url-or-slug> [--private|--org|--public] [--unlisted|--listed] [-t <title>] [-c <slug>|--no-collection] [-m k=v]...'))
       if (!slug || slug.includes('/')) throw new UsageError('usage: share set <url-or-slug> (a whole share, not a file)')
       const s = await ctx.api.json<ShareInfo>('POST', `/_api/shares/${enc(slug)}`, { json: setAttrs(ctx.opts) })
       if (ctx.opts.visibility !== undefined && s.visibility !== ctx.opts.visibility) {
         throw new Error(`the server did not set the visibility (it is ${s.visibility ?? 'unknown'}); is it older than this CLI?`)
       }
+      if (ctx.opts.listed !== undefined && s.listed !== ctx.opts.listed) {
+        throw new Error('the server did not set listed; is it older than this CLI?')
+      }
       ctx.say(table([
-        ['slug', s.slug], ['visibility', `${s.visibility} (${LABEL[s.visibility]})`],
+        ['slug', s.slug], ['visibility', `${s.visibility} (${LABEL[s.visibility]})`], ['listed', String(s.listed)],
         ['title', s.title ?? ''], ['collection', s.collection ?? ''],
         ...Object.entries(s.meta).map(([k, v]) => [`meta.${k}`, typeof v === 'string' ? v : JSON.stringify(v)]),
       ]))
@@ -556,6 +571,10 @@ async function publish(ctx: Ctx, args: string[]) {
 
     const version = await upload(api, name, files, opts)
     const visibility = await checkVisibility(ctx, name, version)
+    // a server older than `listed` ignores it and lists the share
+    if (opts.listed === false && (version === null || (await ctx.shareInfo(name))?.listed !== false)) {
+      throw new Error(`uploaded, but the server did not unlist it; run \`share rm ${name}\` if it must not stay`)
+    }
     if (!opts.json) ctx.note(visibility ? `uploaded (${visibility}: ${LABEL[visibility]})` : 'uploaded')
     ctx.emit({
       url, slug: name, version, files: files.map((f) => f.path),
@@ -614,6 +633,7 @@ async function upload(api: Client, slug: string, files: LocalFile[], opts: Opts)
     ...(Object.keys(opts.meta).length && { meta: opts.meta }),
     ...(opts.message !== undefined && { message: opts.message }),
     ...(opts.visibility !== undefined && { visibility: opts.visibility }),
+    ...(opts.listed !== undefined && { listed: opts.listed }),
   }
   for (let attempt = 0; ; attempt++) {
     try {
@@ -632,6 +652,7 @@ async function legacyUpload(api: Client, slug: string, blobs: (LocalFile & { dat
   if (opts.collection !== undefined) q.set('collection', opts.collection)
   if (opts.title !== undefined) q.set('title', opts.title)
   if (opts.visibility !== undefined) q.set('visibility', opts.visibility)
+  if (opts.listed !== undefined) q.set('listed', opts.listed ? '1' : '0')
   for (const [k, v] of Object.entries(opts.meta)) q.append('meta', `${k}=${v}`)
   const qs = q.size ? `?${q}` : ''
   await api.text('POST', `/_finalize/${enc(slug)}${qs}`, { body: blobs.map((b) => b.path).join('\n') + '\n' })

@@ -22,8 +22,8 @@ export interface ApiEndpoints {
   // install script of the TS `share` binary (`curl -fsSL <app>/install.sh | sh`).
   // /install.sh on the app host, /_install.sh on every host.
   'GET /_install.sh': { response: string }
-  // without prefix: slugs of your shares (admin: all but the private
-  // shares of others), sorted.
+  // without prefix: slugs of your shares (admin: all but the private and
+  // unlisted shares of others), sorted.
   // with ?prefix=<slug>/ or <slug>/<dir>/: full paths of the files under it.
   'GET /_list': { query: { prefix?: string }; response: Lines<string> }
   // Versioned publish: 1. ask which blobs the store lacks, 2. upload them,
@@ -44,8 +44,8 @@ export interface ApiEndpoints {
   // after the uploads: newline-separated relative paths of the share; 400
   // when one of them was not uploaded (the previous version stays live).
   // The query sets the share's attributes in the same commit: `collection`,
-  // `title`, `visibility`, and `meta=<key>=<value>` (repeatable; the value
-  // is a JSON string).
+  // `title`, `visibility`, `listed` (1 or 0), and `meta=<key>=<value>`
+  // (repeatable; the value is a JSON string).
   'POST /_finalize/<slug>': { query: FinalizeQuery; body: Lines<string>; response: 'ok\n' }
   // raw bytes of one file
   'GET /<slug>/<path>': { response: ArrayBuffer }
@@ -98,13 +98,13 @@ export interface ApiEndpoints {
   // create (owner = caller) or update (owner or admin)
   'PUT /_api/collections/<slug>': { body: CollectionUpdate; response: Collection }
   // shares with a live version, newest first. Without `collection`, a
-  // non-admin sees only their own shares. Private shares of others are
-  // never in the list.
+  // non-admin sees only their own shares. Private and unlisted shares of
+  // others are never in the list.
   'GET /_api/shares': { query: ShareQuery; response: ShareInfo[] }
   'GET /_api/shares/<slug>': { response: ShareInfo }
   // set attributes without a publish (owner or admin). visibility: the
   // owner sets any value (public only while PUBLIC_SHARING is on); admin
-  // only changes public to org.
+  // only changes public to org. listed: the owner only.
   'POST /_api/shares/<slug>': { body: ShareAttrs; response: ShareInfo }
   // every version, newest first, pending ones too
   'GET /_api/shares/<slug>/versions': { response: VersionInfo[] }
@@ -199,6 +199,9 @@ export interface ShareAttrs {
   meta?: Record<string, JsonValue>
   // a service token sets private or org only
   visibility?: Visibility
+  // false: the share is left out of lists, search and collections for
+  // everyone but its owner; readers need the link. Default true.
+  listed?: boolean
 }
 
 export interface PublishRequest extends ShareAttrs {
@@ -230,6 +233,7 @@ export interface FinalizeQuery {
   collection?: string
   title?: string
   visibility?: Visibility
+  listed?: '1' | '0'
   meta?: string[] // "<key>=<value>"
 }
 
@@ -270,6 +274,7 @@ export interface ShareInfo {
   collection: string | null
   meta: Record<string, JsonValue>
   visibility: Visibility
+  listed: boolean
   version: number // the live version
   fileCount: number
   totalBytes: number
@@ -313,7 +318,8 @@ export interface ViewLine {
 }
 
 // one line of GET /_audit: tab-separated ISO time, actor email, action
-// (visibility.private, visibility.org, visibility.public, share.rename,
+// (visibility.private, visibility.org, visibility.public, share.listed,
+// share.unlisted, share.rename,
 // ...), share slug
 export interface AuditLine {
   at: string

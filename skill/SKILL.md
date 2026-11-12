@@ -54,6 +54,7 @@ pbpaste | share -f slides.html   # stdin; .html/.md becomes the share's index
 share -e ./dir cool-name-a3f2b   # new version of an existing share, same URL
 share --private notes.md         # only you can open it (not in others' lists)
 share set <url-or-slug> --org    # change who can read it: --private, --org, --public
+share --unlisted notes.md        # readable with the link, in no one else's lists
 share set <slug> -t "New title" -c team/x -m k=v   # or title, collection, metadata
 share set <slug> -t '' --no-collection             # clear the title, leave the collection
 share                            # list your shares
@@ -78,7 +79,9 @@ Each publish is a new version; the share URL shows the newest, and
 Visibility: `--org` (the default: anyone with a @metabase.com login),
 `--private` (only you; others get the same answer as for a missing share),
 `--public` (no login; only if the server allows it). `-e` without a flag
-keeps the share's visibility. Do not combine `-x` with `--private`: the
+keeps the share's visibility. `--unlisted` (and `--listed` to undo it) is separate: the
+share stays readable as above, but only you see it in lists, search and collections, admin
+included. `-e` without it keeps the listing. Do not combine `-x` with `--private`: the
 slug is guessable, and script in any share you open could read it.
 
 ## For agents: --json

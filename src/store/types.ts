@@ -16,6 +16,7 @@ export interface ShareSummary {
   t: number // newest timestamp, 0 when unknown
   o?: string // owner email; undefined on legacy shares (= ADMIN_EMAIL)
   vis?: Visibility // D1+R2 only; undefined = 'org'
+  unlisted?: true // D1+R2 only; see ShareAttrs.listed
   title?: string // D1+R2 only
   c?: string // collection; D1+R2 only
 }
