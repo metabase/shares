@@ -144,9 +144,10 @@ export interface QueryStore {
   collectionOwner(slug: string): Promise<string | null>
   putCollection(slug: string, update: CollectionUpdate, by: string): Promise<Collection>
   // Remove the collection and clear its shares' collection, with an audit entry.
-  // Return false when absent. Throw StoreError(400) for an invalid slug.
-  // The caller checks permissions.
-  deleteCollection(slug: string, by: string): Promise<boolean>
+  // Check access in the transaction; the caller checks service-token scope.
+  // Return false when absent or access changed. Throw StoreError(400) for an invalid slug.
+  deleteCollection(slug: string, by: string,
+    access: { viewer: string; mode: 'owner' | 'readable' | 'admin' }): Promise<boolean>
   // attributes of a share without a publish
   setAttrs(slug: string, attrs: ShareAttrs, by: string): Promise<void>
   queryShares(filter: ShareFilter): Promise<ShareInfo[]>

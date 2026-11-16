@@ -605,15 +605,20 @@ export class D1R2Store implements ShareStore, QueryStore {
     return (await this.collection(slug, by))!
   }
 
-  async deleteCollection(slug: string, by: string) {
+  async deleteCollection(slug: string, by: string,
+    access: { viewer: string; mode: 'owner' | 'readable' | 'admin' }) {
     if (!validCollection(slug)) throw new StoreError(400, `bad collection: ${slug}`)
+    const allowed = `c.slug = ?1 AND (?3 = 'admin' OR (?3 = 'owner' AND c.owner = ?2)
+      OR (?3 = 'readable' AND ${collectionReadableBy('?2')}))`
+    const target = `SELECT c.slug FROM collections c WHERE ${allowed}`
     const results = await this.db.batch([
       this.db.prepare(`INSERT INTO audit (at, actor, action, detail)
-        SELECT ?, ?, 'collection.delete', json_object('collection', slug) FROM collections WHERE slug = ?`)
-        .bind(Date.now(), by, slug),
-      this.db.prepare("UPDATE share_search SET collection = '' WHERE collection = ?").bind(slug),
+        SELECT ?4, ?5, 'collection.delete', json_object('collection', c.slug) FROM collections c WHERE ${allowed}`)
+        .bind(slug, access.viewer, access.mode, Date.now(), by),
+      this.db.prepare(`UPDATE share_search SET collection = '' WHERE collection IN (${target})`)
+        .bind(slug, access.viewer, access.mode),
       // The foreign key sets shares.collection to NULL.
-      this.db.prepare('DELETE FROM collections WHERE slug = ?').bind(slug),
+      this.db.prepare(`DELETE FROM collections WHERE slug IN (${target})`).bind(slug, access.viewer, access.mode),
     ])
     return results[2].meta.changes > 0
   }

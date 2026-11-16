@@ -1,8 +1,8 @@
 import { env } from 'cloudflare:workers'
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import type { ServiceTokenCreated, ServiceTokenInfo, ShareInfo, VersionInfo } from '../src/api-types'
-import { allows } from '../src/api/service'
-import { sha256Hex } from '../src/store/d1r2'
+import { allows, serviceApi } from '../src/api/service'
+import { D1R2Store, sha256Hex } from '../src/store/d1r2'
 import { ADMIN, api, publish, slug, userToken } from './helpers'
 
 const sha = (s: string) => sha256Hex(new TextEncoder().encode(s).buffer as ArrayBuffer)
@@ -215,6 +215,30 @@ describe('service token collection deletion', () => {
     const r = await api('DELETE', `/_api/collections/${col}`, { token })
     expect(r.status).toBe(404)
     expect(await r.json()).toEqual({ error: 'not found' })
+  })
+
+  it('preserves a collection recreated as private before the deletion batch', async () => {
+    const { col } = await collectionFixture()
+    const store = new D1R2Store(env)
+    const remove = store.deleteCollection.bind(store)
+    const top = slug('replacement')
+    vi.spyOn(store, 'deleteCollection').mockImplementationOnce(async (...args) => {
+      await env.DB.prepare('DELETE FROM collections WHERE slug = ?').bind(col).run()
+      const bob = await userToken('bob@metabase.com')
+      await commit(top, { 'a.txt': 'private' }, { collection: col, visibility: 'private' }, bob)
+      return remove(...args)
+    })
+    const url = new URL(`https://shares.test/_api/collections/${col}`)
+    const r = await serviceApi(new Request(url, { method: 'DELETE' }), url, env, store, {
+      kind: 'service', id: 'test', agent: 'agent:cleanup', email: 'agent:cleanup', scopes: [`write:${col}`],
+    })
+    expect(r.status).toBe(404)
+    expect(await store.collectionOwner(col)).toBe('bob@metabase.com')
+    expect(await store.share(top)).toMatchObject({ collection: col, visibility: 'private' })
+    expect((await env.DB.prepare('SELECT collection FROM share_search WHERE slug = ?')
+      .bind(top).first())).toEqual({ collection: col })
+    expect((await env.DB.prepare(`SELECT id FROM audit WHERE json_extract(detail, '$.collection') = ?`)
+      .bind(col).all()).results).toEqual([])
   })
 })
 

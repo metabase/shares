@@ -1,5 +1,6 @@
 import { env } from 'cloudflare:workers'
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
+import { jsonApi } from '../src/api/json'
 import { D1R2Store, sha256Hex } from '../src/store/d1r2'
 import { ADMIN, api, publish, slug, userToken } from './helpers'
 
@@ -279,6 +280,30 @@ describe('collection deletion', () => {
   })
 
   it('rejects an invalid slug at the store boundary', async () => {
-    await expect(new D1R2Store(env).deleteCollection('Upper/Case', ADMIN)).rejects.toMatchObject({ status: 400 })
+    const store = new D1R2Store(env)
+    await expect(store.deleteCollection('Upper/Case', ADMIN, { viewer: ADMIN, mode: 'admin' }))
+      .rejects.toMatchObject({ status: 400 })
+  })
+
+  it('keeps a collection recreated by another owner after the permission check', async () => {
+    const { col } = await collectionFixture()
+    const store = new D1R2Store(env)
+    const remove = store.deleteCollection.bind(store)
+    const top = slug('replacement')
+    vi.spyOn(store, 'deleteCollection').mockImplementationOnce(async (...args) => {
+      await env.DB.prepare('DELETE FROM collections WHERE slug = ?').bind(col).run()
+      await commit(top, { 'a.txt': 'keep' }, { collection: col }, await userToken('bob@metabase.com'))
+      return remove(...args)
+    })
+    const url = new URL(`https://shares.test/_api/collections/${col}`)
+    const r = await jsonApi(new Request(url, { method: 'DELETE' }), url,
+      `_api/collections/${col}`, env, store, 'ann@metabase.com')
+    expect(r.status).toBe(404)
+    expect(await store.collectionOwner(col)).toBe('bob@metabase.com')
+    expect(await store.share(top)).toMatchObject({ collection: col })
+    expect((await env.DB.prepare('SELECT collection FROM share_search WHERE slug = ?')
+      .bind(top).first())).toEqual({ collection: col })
+    expect((await env.DB.prepare(`SELECT id FROM audit WHERE json_extract(detail, '$.collection') = ?`)
+      .bind(col).all()).results).toEqual([])
   })
 })

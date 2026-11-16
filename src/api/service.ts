@@ -119,9 +119,12 @@ async function dispatch(req: Request, url: URL, env: Env, store: ShareStore & Qu
     if (req.method !== 'PUT' && req.method !== 'DELETE') return error(405, 'method not allowed')
     if (!can('write', slug)) return outOfScope()
     // a private collection that this token cannot read: refused without its owner
-    if (!await store.collection(slug, viewer) && await store.collectionOwner(slug)) return error(403, 'not your collection')
+    const c = await store.collection(slug, viewer)
+    if (!c && await store.collectionOwner(slug)) return error(403, 'not your collection')
     if (req.method === 'DELETE') {
-      return await store.deleteCollection(slug, who.agent) ? Response.json({ deleted: slug }) : error(404, 'not found')
+      if (!c) return error(404, 'not found')
+      const deleted = await store.deleteCollection(slug, who.agent, { viewer, mode: 'readable' })
+      return deleted ? Response.json({ deleted: slug }) : error(404, 'not found')
     }
     return Response.json(await store.putCollection(slug, await body(req), who.email))
   }

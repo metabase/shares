@@ -27,7 +27,8 @@ export async function jsonApi(req: Request, url: URL, key: string, env: Env, sto
         const owner = c?.owner ?? await store.collectionOwner(slug)
         if (!owner) return error(404, 'not found')
         if (owner !== who && !admin) return error(403, c ? `owned by ${owner}` : 'not your collection')
-        return await store.deleteCollection(slug, who) ? Response.json({ deleted: slug }) : error(404, 'not found')
+        const deleted = await store.deleteCollection(slug, who, { viewer: who, mode: admin ? 'admin' : 'owner' })
+        return deleted ? Response.json({ deleted: slug }) : error(404, 'not found')
       }
       if (req.method !== 'PUT') return error(405, 'method not allowed')
       // a private collection of another owner: refused without its owner
