@@ -97,6 +97,8 @@ export interface ApiEndpoints {
   'GET /_api/collections/<slug>': { response: Collection }
   // create (owner = caller) or update (owner or admin)
   'PUT /_api/collections/<slug>': { body: CollectionUpdate; response: Collection }
+  // owner or admin; service tokens need write scope. Shares keep their files and versions.
+  'DELETE /_api/collections/<slug>': { response: { deleted: string } }
   // shares with a live version, newest first. Without `collection`, a
   // non-admin sees only their own shares. Private and unlisted shares of
   // others are never in the list.

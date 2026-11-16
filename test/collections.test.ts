@@ -1,3 +1,4 @@
+import { env } from 'cloudflare:workers'
 import { describe, expect, it } from 'vitest'
 import { sha256Hex } from '../src/store/d1r2'
 import { ADMIN, api, publish, slug, userToken } from './helpers'
@@ -121,6 +122,67 @@ describe('collections and metadata', () => {
     expect(c).toMatchObject({ owner: 'ann@metabase.com', title: 'Reviews', shares: 1 })
     expect((await post(`/_api/collections/${col}`, { meta: { x: null } }, ann, 'PUT')).status).toBe(400)
     expect((await json(`/_api/collections/${col}/nope`)).status).toBe(404)
+  })
+
+  it('deletes an empty collection as its owner and returns 404 when missing', async () => {
+    const ann = await userToken('ann@metabase.com')
+    const bob = await userToken('bob@metabase.com')
+    const col = `empty/${slug('collection')}`
+    expect((await post(`/_api/collections/${col}`, { title: 'Empty' }, ann, 'PUT')).status).toBe(200)
+    const refused = await api('DELETE', `/_api/collections/${col}`, { token: bob })
+    expect(refused.status).toBe(403)
+    expect(await refused.text()).not.toContain('ann@metabase.com')
+    expect((await json(`/_api/collections/${col}`, ann)).status).toBe(200)
+    const r = await api('DELETE', `/_api/collections/${col}`, { token: ann })
+    expect(r.status).toBe(200)
+    expect(await r.json()).toEqual({ deleted: col })
+    expect((await api('DELETE', `/_api/collections/${col}`, { token: ann })).status).toBe(404)
+    const { results } = await env.DB.prepare("SELECT actor, action FROM audit WHERE json_extract(detail, '$.collection') = ?")
+      .bind(col).all()
+    expect(results).toEqual([{ actor: 'ann@metabase.com', action: 'collection.delete' }])
+  })
+
+  it('keeps shares of all owners, versions and files, and clears the collection from search', async () => {
+    const ann = await userToken('ann@metabase.com')
+    const bob = await userToken('bob@metabase.com')
+    const col = `remove/${slug('collection')}`
+    const a = slug('keep')
+    const b = slug('keep-private')
+    await commit(a, { 'a.txt': 'one' }, { collection: col, title: 'Keep me', meta: { k: 'v' } }, ann)
+    await commit(a, { 'a.txt': 'two' }, {}, ann)
+    await commit(b, { 'b.txt': 'secret' }, { collection: col, visibility: 'private', listed: false }, bob)
+    for (const other of [col + '-sibling', col + '/child']) {
+      expect((await post(`/_api/collections/${other}`, { title: 'Other' }, ann, 'PUT')).status).toBe(200)
+    }
+    const refused = await api('DELETE', `/_api/collections/${col}`, { token: bob })
+    expect(refused.status).toBe(403)
+    const before = (await json(`/_api/shares/${b}`, bob)).body
+    const r = await api('DELETE', `/_api/collections/${col}`, { token: ann })
+    expect(r.status).toBe(200)
+    expect((await json(`/_api/collections/${col}`, ann)).status).toBe(404)
+    expect((await json(`/_api/collections?prefix=${col}`, ann)).body.map((c: any) => c.slug).sort())
+      .toEqual([col + '-sibling', col + '/child'])
+    expect((await json(`/_api/shares/${a}`, ann)).body)
+      .toMatchObject({ collection: null, title: 'Keep me', meta: { k: 'v' }, version: 2 })
+    expect((await json(`/_api/shares/${b}`, bob)).body).toEqual({ ...before, collection: null })
+    expect((await json(`/_api/shares/${a}/versions`, ann)).body).toHaveLength(2)
+    expect(await (await api('GET', `/${a}@1/a.txt`, { token: ann })).text()).toBe('one')
+    expect(await (await api('GET', `/${a}/a.txt`, { token: ann })).text()).toBe('two')
+    expect(await (await api('GET', `/${b}/b.txt`, { token: bob })).text()).toBe('secret')
+    const { results } = await env.DB.prepare('SELECT slug, collection FROM share_search WHERE slug IN (?, ?) ORDER BY slug')
+      .bind(a, b).all()
+    expect(results).toEqual([a, b].sort().map((slug) => ({ slug, collection: '' })))
+    expect((await env.DB.prepare('SELECT slug FROM share_search WHERE share_search MATCH ?')
+      .bind(`collection : "${col}"`).all()).results).toEqual([])
+  })
+
+  it('lets the admin delete another owner\'s private collection', async () => {
+    const ann = await userToken('ann@metabase.com')
+    const col = `admin/${slug('collection')}`
+    await post(`/_api/collections/${col}`, { title: 'Private' }, ann, 'PUT')
+    expect((await json(`/_api/collections/${col}`)).status).toBe(404)
+    expect((await api('DELETE', `/_api/collections/${col}`)).status).toBe(200)
+    expect((await json(`/_api/collections/${col}`, ann)).status).toBe(404)
   })
 
   it('lists shares outside a collection to their owner only', async () => {

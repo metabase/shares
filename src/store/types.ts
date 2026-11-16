@@ -143,6 +143,8 @@ export interface QueryStore {
   // only, never shown to the writer
   collectionOwner(slug: string): Promise<string | null>
   putCollection(slug: string, update: CollectionUpdate, by: string): Promise<Collection>
+  // remove the collection, keep its shares without a collection; audit logged
+  deleteCollection(slug: string, by: string): Promise<boolean>
   // attributes of a share without a publish
   setAttrs(slug: string, attrs: ShareAttrs, by: string): Promise<void>
   queryShares(filter: ShareFilter): Promise<ShareInfo[]>

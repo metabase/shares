@@ -29,6 +29,9 @@ owner (admin included); people with the link can still open it.
 `share set` changes the visibility, listing, title, collection or metadata of a share without a
 publish.
 
+Delete a collection with `share collection rm <slug>`. Its shares leave the collection but keep their files and versions.
+User tokens require ownership or admin access. Service tokens require write scope.
+
 Binaries are for macOS and Linux (glibc), arm64 and x64. On Windows, use WSL.
 `share -h` lists every command.
 

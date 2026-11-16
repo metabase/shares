@@ -605,6 +605,19 @@ export class D1R2Store implements ShareStore, QueryStore {
     return (await this.collection(slug, by))!
   }
 
+  async deleteCollection(slug: string, by: string) {
+    if (!validCollection(slug)) throw new StoreError(400, `bad collection: ${slug}`)
+    const results = await this.db.batch([
+      this.db.prepare(`INSERT INTO audit (at, actor, action, detail)
+        SELECT ?, ?, 'collection.delete', json_object('collection', slug) FROM collections WHERE slug = ?`)
+        .bind(Date.now(), by, slug),
+      this.db.prepare("UPDATE share_search SET collection = '' WHERE collection = ?").bind(slug),
+      // The foreign key sets shares.collection to NULL.
+      this.db.prepare('DELETE FROM collections WHERE slug = ?').bind(slug),
+    ])
+    return results[2].meta.changes > 0
+  }
+
   async setAttrs(slug: string, attrs: ShareAttrs, by: string) {
     checkAttrs(attrs, this.env)
     const now = Date.now()

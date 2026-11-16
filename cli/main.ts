@@ -29,6 +29,7 @@ export const HELP = `usage: share <file-or-dir> [name]        publish (new slug 
        share -x <file-or-dir> <name>     exact slug, no random suffix (fails if taken)
        ... | share -f <name> [slug]      publish stdin as file <name> (-e: <slug> needed)
        share rm <url-or-slug>            delete a share (local mirror copy stays)
+       share collection rm <slug>        delete a collection; keep its shares
        share download <url-or-slug> [dest]  pull a share's files into dest/ (default: slug/)
        share cat <url-or-slug>[/file]    print share contents to stdout (URL ok as-is)
        share ls <url-or-slug>            list files in a share
@@ -106,7 +107,7 @@ stderr is not a terminal). An installed Claude Code skill
 stderr line too, at most once a day (also when stderr is not a terminal).
 `
 
-const COMMANDS = new Set(['login', 'logout', 'whoami', 'rm', 'ls', 'cat', 'download', 'views', 'log', 'public', 'set', 'api', 'local', 'help', 'version', 'token', 'update'])
+const COMMANDS = new Set(['login', 'logout', 'whoami', 'rm', 'collection', 'ls', 'cat', 'download', 'views', 'log', 'public', 'set', 'api', 'local', 'help', 'version', 'token', 'update'])
 
 // commands that run also when the server says this CLI is too old
 const ALWAYS = new Set(['update', 'version', 'help', 'login', 'logout'])
@@ -331,6 +332,13 @@ async function run(ctx: Ctx, cmd: string, a: string[]) {
     case 'version': ctx.say(`share ${VERSION}`); ctx.emit({ version: VERSION }); return
     case 'login': return login(ctx, a[0])
     case 'token': return token(ctx, a)
+    case 'collection': {
+      if (a[0] !== 'rm' || a.length !== 2 || !a[1]) throw new UsageError('usage: share collection rm <slug>')
+      const result = await ctx.api.json<{ deleted: string }>('DELETE', `/_api/collections/${enc(a[1])}`)
+      ctx.say(`deleted collection ${result.deleted} (shares kept)`)
+      ctx.emit(result)
+      return
+    }
     case 'update': return update(ctx)
     case 'logout': return logout(ctx)
     case 'whoami': {

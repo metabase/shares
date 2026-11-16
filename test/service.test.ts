@@ -69,6 +69,34 @@ describe('service tokens', () => {
     expect((await api('GET', `/_api/shares/${top}`)).status).toBe(404)
   })
 
+  it('deletes collections only in write scope, keeps their shares and records the agent', async () => {
+    const prefix = slug('cleanup')
+    const col = `${prefix}/runs`
+    const { token } = await serviceToken({ name: 'cleanup', scopes: [`write:${prefix}/*`] })
+    const reader = await serviceToken({ name: 'cleanup-reader', scopes: [`read:${prefix}/*`] })
+    const top = slug('kept')
+    expect((await commit(top, { 'a.txt': 'keep' }, { collection: col }, token)).status).toBe(200)
+    expect((await api('DELETE', `/_api/collections/${col}`, { token: reader.token })).status).toBe(403)
+    const ann = await userToken('ann@metabase.com')
+    const privateCol = `${prefix}/private`
+    await post(`/_api/collections/${privateCol}`, { title: 'Private' }, ann, 'PUT')
+    const refused = await api('DELETE', `/_api/collections/${privateCol}`, { token })
+    expect(refused.status).toBe(403)
+    expect(await refused.text()).not.toContain('ann@metabase.com')
+    const outside = `outside/${prefix}`
+    await post(`/_api/collections/${outside}`, { title: 'Outside' }, undefined, 'PUT')
+    expect((await api('DELETE', `/_api/collections/${outside}`, { token })).status).toBe(403)
+    expect((await env.DB.prepare('SELECT slug FROM collections WHERE slug = ?').bind(outside).first())).not.toBeNull()
+    const r = await api('DELETE', `/_api/collections/${col}`, { token })
+    expect(r.status).toBe(200)
+    expect(await r.json()).toEqual({ deleted: col })
+    expect((await api('DELETE', `/_api/collections/${col}`, { token })).status).toBe(404)
+    expect(await (await api('GET', `/${top}/a.txt`)).text()).toBe('keep')
+    expect(await (await api('GET', `/_api/shares/${top}`)).json()).toMatchObject({ collection: null })
+    expect(await env.DB.prepare("SELECT actor, action FROM audit WHERE json_extract(detail, '$.collection') = ?")
+      .bind(col).first()).toEqual({ actor: 'agent:cleanup', action: 'collection.delete' })
+  })
+
   it('cannot touch shares outside its collections or use user routes', async () => {
     const { token } = await serviceToken({ name: 'ci', scopes: ['write:ci/*'] })
     const ann = await userToken('ann@metabase.com')
