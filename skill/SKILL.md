@@ -115,13 +115,14 @@ Agent systems publish runs into collections with metadata, then query them.
 share --collection metareview/pr-85416 --title "Run 1" --meta pr=85416 \
       --message "r1 4f1c..." ./out           # made if missing
 share api collections                        # GET /_api/collections as JSON
-share collection rm metareview/pr-85416       # delete the collection; keep its shares
 share api 'shares?collection=metareview/pr-85416&meta.pr=85416'
 share api shares/<slug>/versions
+share collection rm metareview/pr-85416       # delete the collection; keep its shares
 ```
 
 Collection deletion removes the collection from its shares. Files and versions stay intact.
-User tokens require ownership or admin access. Service tokens require write scope.
+User tokens require ownership or admin access. Service tokens require write scope and access to the collection.
+After deletion, service tokens lose access to its shares because those shares have no collection.
 
 The web app lists, searches (`?q=`) and filters (`?c=<collection>`) shares
 at `https://app.shares.metabase.fyi/`; `/_s/<slug>` shows one share with its

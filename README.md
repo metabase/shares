@@ -30,7 +30,8 @@ owner (admin included); people with the link can still open it.
 publish.
 
 Delete a collection with `share collection rm <slug>`. Its shares leave the collection but keep their files and versions.
-User tokens require ownership or admin access. Service tokens require write scope.
+User tokens require ownership or admin access. Service tokens require write scope and access to the collection.
+After deletion, service tokens lose access to its shares because those shares have no collection.
 
 Binaries are for macOS and Linux (glibc), arm64 and x64. On Windows, use WSL.
 `share -h` lists every command.

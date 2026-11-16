@@ -107,7 +107,10 @@ stderr is not a terminal). An installed Claude Code skill
 stderr line too, at most once a day (also when stderr is not a terminal).
 `
 
-const COMMANDS = new Set(['login', 'logout', 'whoami', 'rm', 'collection', 'ls', 'cat', 'download', 'views', 'log', 'public', 'set', 'api', 'local', 'help', 'version', 'token', 'update'])
+const COMMANDS = new Set([
+  'login', 'logout', 'whoami', 'rm', 'collection', 'ls', 'cat', 'download', 'views', 'log', 'public',
+  'set', 'api', 'local', 'help', 'version', 'token', 'update',
+])
 
 // commands that run also when the server says this CLI is too old
 const ALWAYS = new Set(['update', 'version', 'help', 'login', 'logout'])
