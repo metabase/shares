@@ -230,13 +230,23 @@ describe('collection deletion', () => {
     const { owner, col } = await collectionFixture()
     const top = slug('searchable')
     const title = slug('retained-title')
+    const privateTop = slug('private-searchable')
+    const privateTitle = slug('private-retained-title')
     await commit(top, { 'a.txt': 'keep' }, { collection: col, title }, owner)
+    const bob = await userToken('bob@metabase.com')
+    await commit(privateTop, { 'b.txt': 'private' }, {
+      collection: col, title: privateTitle, visibility: 'private', listed: false,
+    }, bob)
     const store = new D1R2Store(env)
-    const search = async (q: string) => (await store.search(q, undefined, 'ann@metabase.com', 10)).map((s) => s.slug)
+    const search = async (q: string, viewer = 'ann@metabase.com') =>
+      (await store.search(q, undefined, viewer, 10)).map((s) => s.slug).sort()
     expect(await search(col)).toEqual([top])
+    expect(await search(col, 'bob@metabase.com')).toEqual([top, privateTop].sort())
     expect((await api('DELETE', `/_api/collections/${col}`, { token: owner })).status).toBe(200)
     expect(await search(col)).toEqual([])
+    expect(await search(col, 'bob@metabase.com')).toEqual([])
     expect(await search(title)).toEqual([top])
+    expect(await search(privateTitle, 'bob@metabase.com')).toEqual([privateTop])
   })
 
   it('records one audit entry for a deletion, including after a repeated request', async () => {

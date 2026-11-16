@@ -85,13 +85,7 @@ describe('share set', () => {
 describe('share collection rm', () => {
   afterEach(() => { vi.unstubAllGlobals() })
 
-  it.each([
-    { args: ['collection'] },
-    { args: ['collection', 'rm'] },
-    { args: ['collection', 'rm', ''] },
-    { args: ['collection', 'rm', 'team/run', 'extra'] },
-    { args: ['collection', 'nope', 'team/run'] },
-  ])('rejects invalid arguments $args before making a request', async ({ args }) => {
+  async function run(args: string[]) {
     const fetch = vi.fn()
     vi.stubGlobal('fetch', fetch)
     let stdout = ''
@@ -103,9 +97,25 @@ describe('share collection rm', () => {
       env: { HOME: home, SHARES_URL: 'https://app.test', SHARES_TOKEN: 't' },
       cwd: home,
     })
-    expect(code).toBe(2)
-    expect(JSON.parse(stdout)).toEqual({ error: expect.any(String) })
-    expect(fetch).not.toHaveBeenCalled()
+    return { code, output: JSON.parse(stdout), fetch }
+  }
+
+  it.each([
+    { args: ['collection'] },
+    { args: ['collection', 'rm'] },
+    { args: ['collection', 'rm', ''] },
+    { args: ['collection', 'rm', 'team/run', 'extra'] },
+    { args: ['collection', 'nope', 'team/run'] },
+  ])('rejects invalid arguments $args before making a request', async ({ args }) => {
+    const r = await run(args)
+    expect(r.code).toBe(2)
+    expect(r.output).toEqual({ error: expect.any(String) })
+    expect(r.fetch).not.toHaveBeenCalled()
+  })
+
+  it('shows the collection removal syntax on argument errors', async () => {
+    const r = await run(['collection'])
+    expect(r.output).toEqual({ error: 'usage: share collection rm <slug>' })
   })
 })
 
