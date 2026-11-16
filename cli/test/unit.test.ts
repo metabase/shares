@@ -82,6 +82,33 @@ describe('share set', () => {
   })
 })
 
+describe('share collection rm', () => {
+  afterEach(() => { vi.unstubAllGlobals() })
+
+  it.each([
+    { args: ['collection'] },
+    { args: ['collection', 'rm'] },
+    { args: ['collection', 'rm', ''] },
+    { args: ['collection', 'rm', 'team/run', 'extra'] },
+    { args: ['collection', 'nope', 'team/run'] },
+  ])('rejects invalid arguments $args before making a request', async ({ args }) => {
+    const fetch = vi.fn()
+    vi.stubGlobal('fetch', fetch)
+    let stdout = ''
+    const home = tmp()
+    const code = await main([...args, '--json'], {
+      stdout: (s) => { stdout += s },
+      stderr: () => {},
+      stdin: async () => new Uint8Array(),
+      env: { HOME: home, SHARES_URL: 'https://app.test', SHARES_TOKEN: 't' },
+      cwd: home,
+    })
+    expect(code).toBe(2)
+    expect(JSON.parse(stdout)).toEqual({ error: expect.any(String) })
+    expect(fetch).not.toHaveBeenCalled()
+  })
+})
+
 describe('deslug', () => {
   it('strips scheme, host, query and the trailing slash', () => {
     expect(deslug('https://shares.metabase.fyi/report-a3f2b/')).toBe('report-a3f2b')

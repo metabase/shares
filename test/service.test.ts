@@ -69,34 +69,6 @@ describe('service tokens', () => {
     expect((await api('GET', `/_api/shares/${top}`)).status).toBe(404)
   })
 
-  it('deletes collections only in write scope, keeps their shares and records the agent', async () => {
-    const prefix = slug('cleanup')
-    const col = `${prefix}/runs`
-    const { token } = await serviceToken({ name: 'cleanup', scopes: [`write:${prefix}/*`] })
-    const reader = await serviceToken({ name: 'cleanup-reader', scopes: [`read:${prefix}/*`] })
-    const top = slug('kept')
-    expect((await commit(top, { 'a.txt': 'keep' }, { collection: col }, token)).status).toBe(200)
-    expect((await api('DELETE', `/_api/collections/${col}`, { token: reader.token })).status).toBe(403)
-    const ann = await userToken('ann@metabase.com')
-    const privateCol = `${prefix}/private`
-    await post(`/_api/collections/${privateCol}`, { title: 'Private' }, ann, 'PUT')
-    const refused = await api('DELETE', `/_api/collections/${privateCol}`, { token })
-    expect(refused.status).toBe(403)
-    expect(await refused.text()).not.toContain('ann@metabase.com')
-    const outside = `outside/${prefix}`
-    await post(`/_api/collections/${outside}`, { title: 'Outside' }, undefined, 'PUT')
-    expect((await api('DELETE', `/_api/collections/${outside}`, { token })).status).toBe(403)
-    expect((await env.DB.prepare('SELECT slug FROM collections WHERE slug = ?').bind(outside).first())).not.toBeNull()
-    const r = await api('DELETE', `/_api/collections/${col}`, { token })
-    expect(r.status).toBe(200)
-    expect(await r.json()).toEqual({ deleted: col })
-    expect((await api('DELETE', `/_api/collections/${col}`, { token })).status).toBe(404)
-    expect(await (await api('GET', `/${top}/a.txt`)).text()).toBe('keep')
-    expect(await (await api('GET', `/_api/shares/${top}`)).json()).toMatchObject({ collection: null })
-    expect(await env.DB.prepare("SELECT actor, action FROM audit WHERE json_extract(detail, '$.collection') = ?")
-      .bind(col).first()).toEqual({ actor: 'agent:cleanup', action: 'collection.delete' })
-  })
-
   it('cannot touch shares outside its collections or use user routes', async () => {
     const { token } = await serviceToken({ name: 'ci', scopes: ['write:ci/*'] })
     const ann = await userToken('ann@metabase.com')
@@ -172,6 +144,77 @@ describe('service tokens', () => {
     await serviceToken({ name: 'hidden', scopes: ['read:x'] }, await userToken(ADMIN))
     const mine = await (await api('GET', '/_api/tokens')).json<{ name: string }[]>()
     expect(mine.map((t) => t.name)).not.toContain('hidden')
+  })
+})
+
+describe('service token collection deletion', () => {
+  async function collectionFixture(onBehalfOf?: string) {
+    const col = `cleanup/${slug('collection')}`
+    const { token } = await serviceToken({
+      name: 'cleanup', scopes: [`write:${col}`], on_behalf_of: onBehalfOf,
+    })
+    expect((await post(`/_api/collections/${col}`, { title: 'Collection' }, token, 'PUT')).status).toBe(200)
+    return { col, token }
+  }
+
+  it('deletes an empty collection on behalf of its owner and audits the agent', async () => {
+    const { col, token } = await collectionFixture('ann@metabase.com')
+    expect(await (await api('GET', `/_api/collections/${col}`, { token })).json())
+      .toMatchObject({ owner: 'ann@metabase.com', shares: 0 })
+    const r = await api('DELETE', `/_api/collections/${col}`, { token })
+    expect(r.status).toBe(200)
+    expect(await r.json()).toEqual({ deleted: col })
+    const { results } = await env.DB.prepare(`SELECT actor, action FROM audit
+      WHERE json_extract(detail, '$.collection') = ?`).bind(col).all()
+    expect(results).toEqual([{ actor: 'agent:cleanup', action: 'collection.delete' }])
+  })
+
+  it('keeps shares but loses access to them after deleting their collection', async () => {
+    const { col, token } = await collectionFixture()
+    const top = slug('kept')
+    expect((await commit(top, { 'a.txt': 'keep' }, { collection: col }, token)).status).toBe(200)
+    expect(await (await api('GET', `/${top}/a.txt`, { token })).text()).toBe('keep')
+    expect((await api('DELETE', `/_api/collections/${col}`, { token })).status).toBe(200)
+    expect((await api('GET', `/${top}/a.txt`, { token })).status).toBe(403)
+    expect((await api('GET', `/_api/shares/${top}`, { token })).status).toBe(403)
+    expect(await (await api('GET', `/${top}/a.txt`)).text()).toBe('keep')
+    expect(await (await api('GET', `/_api/shares/${top}`)).json()).toMatchObject({ collection: null })
+  })
+
+  it('refuses a read-only token', async () => {
+    const { col, token } = await collectionFixture()
+    const reader = await serviceToken({ name: 'cleanup-reader', scopes: [`read:${col}`] })
+    await commit(slug('visible'), { 'a.txt': 'a' }, { collection: col }, token)
+    expect((await api('GET', `/_api/collections/${col}`, { token: reader.token })).status).toBe(200)
+    expect((await api('DELETE', `/_api/collections/${col}`, { token: reader.token })).status).toBe(403)
+    expect((await api('GET', `/_api/collections/${col}`, { token })).status).toBe(200)
+  })
+
+  it('refuses a collection outside write scope', async () => {
+    const { col, token } = await collectionFixture()
+    const outside = col + '-outside'
+    await post(`/_api/collections/${outside}`, { title: 'Outside' }, undefined, 'PUT')
+    expect((await api('DELETE', `/_api/collections/${outside}`, { token })).status).toBe(403)
+    expect((await api('GET', `/_api/collections/${outside}`)).status).toBe(200)
+  })
+
+  it('refuses a private collection without disclosing its owner', async () => {
+    const col = `cleanup/${slug('private')}`
+    const ann = await userToken('ann@metabase.com')
+    await post(`/_api/collections/${col}`, { title: 'Private' }, ann, 'PUT')
+    const { token } = await serviceToken({ name: 'cleanup', scopes: [`write:${col}`] })
+    const r = await api('DELETE', `/_api/collections/${col}`, { token })
+    expect(r.status).toBe(403)
+    expect(await r.text()).not.toContain('ann@metabase.com')
+    expect((await api('GET', `/_api/collections/${col}`, { token: ann })).status).toBe(200)
+  })
+
+  it('returns 404 for a missing collection in write scope', async () => {
+    const { col, token } = await collectionFixture()
+    expect((await api('DELETE', `/_api/collections/${col}`, { token })).status).toBe(200)
+    const r = await api('DELETE', `/_api/collections/${col}`, { token })
+    expect(r.status).toBe(404)
+    expect(await r.json()).toEqual({ error: 'not found' })
   })
 })
 

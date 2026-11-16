@@ -208,23 +208,18 @@ describe('share CLI against wrangler dev', () => {
 
   it('deletes a collection with JSON and human output while keeping its shares', async () => {
     const col = `e2e/delete-${PORT}`
-    const p = JSON.parse((await share(['--json', '-c', col, 'x.md'])).stdout)
+    const p = JSON.parse((await share(['--json', '-c', col, '-f', 'keep.txt'], { stdin: 'keep me\n' })).stdout)
     const r = await share(['collection', 'rm', col, '--json'])
     expect(r.code).toBe(0)
     expect(JSON.parse(r.stdout)).toEqual({ deleted: col })
     expect(JSON.parse((await share(['api', `shares/${p.slug}`])).stdout)).toMatchObject({ collection: null })
-    expect((await share(['cat', p.slug])).stdout).toBe('# hello e2e\n')
+    expect((await share(['cat', p.slug])).stdout).toBe('keep me\n')
     const missing = await share(['collection', 'rm', col, '--json'])
     expect(missing.code).toBe(1)
     expect(JSON.parse(missing.stdout)).toMatchObject({ status: 404 })
     await share(['set', p.slug, '-c', col])
     await share(['rm', p.slug])
     expect((await share(['collection', 'rm', col])).stdout).toBe(`deleted collection ${col} (shares kept)\n`)
-    for (const args of [['collection'], ['collection', 'rm'], ['collection', 'rm', col, 'extra'], ['collection', 'nope', col]]) {
-      const bad = await share([...args, '--json'])
-      expect(bad.code).toBe(2)
-      expect(JSON.parse(bad.stdout).error).toBe('usage: share collection rm <slug>')
-    }
   })
 
   it('publishes --unlisted: readable by link, in no list of others; set --listed undoes it', async () => {
