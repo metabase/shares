@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it } from 'vitest'
 import { env } from 'cloudflare:workers'
 import { sha256Hex } from '../src/store/d1r2'
-import { lineDiff, hunks } from '../src/web/diff'
+import { changedSpan, lineDiff, hunks } from '../src/web/diff'
 import { shortSlug } from '../src/web/serve'
 import { ADMIN, ORIGIN, api, browse, fetchWorker, sessionCookie, slug, userToken } from './helpers'
 
@@ -70,6 +70,19 @@ describe('line diff', () => {
     expect(h[0]).toBeNull()
     expect(h.filter((o) => o?.t === '+').map((o) => o!.s)).toEqual(['x'])
     expect(h.filter(Boolean)).toHaveLength(6)
+  })
+
+  it('finds the changed words of a rewritten line', () => {
+    const span = (a: string, b: string) => {
+      const { head, tail } = changedSpan(a, b)
+      return [a.slice(head, a.length - tail), b.slice(head, b.length - tail)]
+    }
+    expect(span('the interface. It is built from mbcode', 'the interface. The proposal is to build it from mbcode'))
+      .toEqual(['It is built', 'The proposal is to build it'])
+    expect(span('seven made', 'several made')).toEqual(['seven', 'several'])
+    expect(span('a b', 'a b c')).toEqual(['', ' c'])
+    expect(span('aa', 'a')).toEqual(['aa', 'a'])
+    expect(span('x', 'y')).toEqual(['x', 'y'])
   })
 
   it('has no hunks for equal texts', () => {
@@ -215,8 +228,9 @@ describe('web app', () => {
 
     const d = (await text(`/_s/${top}?diff=1..2`)).body
     expect(d).toContain('3 of 3 files differ')
-    expect(d).toContain('<span class="d-del">- two</span>')
-    expect(d).toContain('<span class="d-add">+ TWO</span>')
+    expect(d).toContain('<code class="nohighlight">')
+    expect(d).toContain('<span class="d-del">- two\n</span>')
+    expect(d).toContain('<span class="d-add">+ TWO\n</span>')
     expect(d).toMatch(/gone\.txt<\/b> <span class="tag removed">removed/)
     expect(d).toMatch(/new\.txt<\/b> <span class="tag added">added/)
   })
