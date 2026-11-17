@@ -65,6 +65,23 @@ export function hunks(ops: Op[], context = 3): (Op | null)[] {
   return out
 }
 
+// The part of a changed line that differs from its other side: `head` and
+// `tail` are the lengths of the shared start and end, widened to whole
+// words. ponytail: shared start and end only, so two edits on one line mark
+// everything between them; diff the words with the LCS if that reads badly.
+export function changedSpan(a: string, b: string): { head: number; tail: number } {
+  const inWord = (c: string | undefined) => c !== undefined && !/\s/.test(c)
+  const max = Math.min(a.length, b.length)
+  let head = 0
+  while (head < max && a[head] === b[head]) head++
+  // a cut inside a word moves back to the start of the word
+  while (head > 0 && inWord(a[head - 1]) && (inWord(a[head]) || inWord(b[head]))) head--
+  let tail = 0
+  while (tail < max - head && a[a.length - 1 - tail] === b[b.length - 1 - tail]) tail++
+  while (tail > 0 && inWord(a[a.length - tail]) && (inWord(a[a.length - tail - 1]) || inWord(b[b.length - tail - 1]))) tail--
+  return { head, tail }
+}
+
 // text of a blob, or null for binary data (a NUL byte in the first 4 KiB)
 export function asText(buf: ArrayBuffer | null): string | null {
   if (!buf) return null

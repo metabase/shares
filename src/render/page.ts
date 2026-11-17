@@ -199,6 +199,9 @@ ${opts.slug ? `<footer><small>clone this share: <code>share download ${esc(opts.
     var m = c.className.match(/language-([\\w-]+)/)
     if (m) need[ALIAS[m[1]] || m[1]] = true
   })
+  document.querySelectorAll('code[data-lang]').forEach(function (c) {
+    if (Object.hasOwn(ALIAS, c.dataset.lang)) need[ALIAS[c.dataset.lang]] = true
+  })
   // ALIAS picks which grammar file loads, but hljs also has to accept the
   // fence's own name (\`\`\`gleam -> language-gleam): unknown class names
   // otherwise render plain, they do not auto-detect
@@ -206,7 +209,44 @@ ${opts.slug ? `<footer><small>clone this share: <code>share download ${esc(opts.
     if (!hljs.getLanguage(a)) hljs.registerAliases(a, { languageName: ALIAS[a] })
   })
   var pending = 0
-  function done() { if (--pending === 0) hljs.highlightAll() }
+  // Version diff (code[data-lang], one .d-t span per line): colour each line
+  // by itself, so the added and removed line spans stay. The <mark> on the
+  // changed words comes back as a CSS custom highlight, which needs no
+  // element; without that API a marked line keeps its mark and gets no
+  // syntax colours.
+  function hlDiff() {
+    var hi = window.Highlight && window.CSS && CSS.highlights
+    document.querySelectorAll('code[data-lang] .d-t').forEach(function (el) {
+      var lang = el.closest('code').dataset.lang
+      // own keys only: a file named x.constructor must not reach Object
+      if (Object.hasOwn(ALIAS, lang)) lang = ALIAS[lang]
+      var m = el.querySelector('mark')
+      if (!hljs.getLanguage(lang) || (m && !hi)) return
+      var from = 0, len = 0
+      if (m) {
+        var before = document.createRange()
+        before.setStart(el, 0)
+        before.setEndBefore(m)
+        from = before.toString().length
+        len = m.textContent.length
+      }
+      el.innerHTML = hljs.highlight(el.textContent, { language: lang }).value
+      if (!len) return
+      var range = document.createRange(), at = 0, n
+      var texts = document.createTreeWalker(el, NodeFilter.SHOW_TEXT)
+      while ((n = texts.nextNode())) {
+        var end = at + n.length
+        if (from >= at && from < end) range.setStart(n, from - at)
+        if (from + len > at && from + len <= end) range.setEnd(n, from + len - at)
+        at = end
+      }
+      var kind = el.parentElement.className
+      if (!CSS.highlights.has(kind)) CSS.highlights.set(kind, new Highlight())
+      CSS.highlights.get(kind).add(range)
+    })
+  }
+  function hl() { hljs.highlightAll(); hlDiff() }
+  function done() { if (--pending === 0) hl() }
   Object.keys(need).forEach(function (l) {
     if (hljs.getLanguage(l)) return
     pending++
@@ -215,7 +255,7 @@ ${opts.slug ? `<footer><small>clone this share: <code>share download ${esc(opts.
     s.onload = s.onerror = done
     document.head.appendChild(s)
   })
-  if (!pending) hljs.highlightAll()
+  if (!pending) hl()
   // mermaid fences -> inline diagrams. Lazy CDN load only when present;
   // load failure just leaves the highlighted code block. The copy button
   // added above keeps a closure on the original pre, so it copies source.

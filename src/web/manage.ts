@@ -9,7 +9,7 @@ import { ICON, STYLE, copyLink, iconLink, nav, person, privateTag, when } from '
 import { contentBase, hostKind, type HostKind } from '../origins'
 import { INDEX_PAGES, canRead, isQueryStore, StoreError, type QueryStore, type ShareStore } from '../store'
 import type { Collection, ShareInfo, ShareManifest, VersionInfo, Visibility } from '../api-types'
-import { asText, hunks, lineDiff } from './diff'
+import { asText, changedSpan, hunks, lineDiff, type Op } from './diff'
 import { uploadToken, uploadUi } from './upload'
 
 // one old file shown as text; bigger files show their size only
@@ -236,15 +236,41 @@ async function diffSection(store: QueryStore, slug: string, self: string, a: num
       blocks.push(fileHead(p, state(p), tx === null || ty === null ? 'binary' : 'too large for a line diff'))
       continue
     }
-    const lines = hunks(ops).map((o) => o === null
-      ? '<span class="d-gap">…</span>'
-      : `<span${o.t === '+' ? ' class="d-add"' : o.t === '-' ? ' class="d-del"' : ''}>${o.t} ${esc(o.s)}</span>`)
-    blocks.push(`${fileHead(p, state(p))}<pre><code>${lines.join('\n')}</code></pre>`)
+    blocks.push(`${fileHead(p, state(p))}<pre><code class="nohighlight" data-lang="${/\.([a-z0-9]+)$/i.exec(p)?.[1].toLowerCase() ?? ''}">${diffLines(hunks(ops))}</code></pre>`)
   }
   const more = changed.length > MAX_DIFF_FILES ? `<p class="sub">${changed.length - MAX_DIFF_FILES} more changed files not shown.</p>` : ''
   return `<h2>Diff v${a} → v${b}</h2>
 <p class="sub">${changed.length} of ${paths.length} files differ · <a href="${self}?v=${a}">v${a} files</a> · <a href="${self}?v=${b}">v${b} files</a></p>
 ${blocks.join('\n')}${more}`
+}
+
+// One span per line, each with its own newline so the text copies as a
+// diff. The text of a line is in a d-t span, which the page script colours
+// by the language of the file. A run of removed lines followed by as many added lines is a rewrite:
+// each pair gets a <mark> on the part that differs.
+function diffLines(ops: (Op | null)[]) {
+  const pair = new Map<number, number>()
+  for (let i = 0; i < ops.length; i++) {
+    if (ops[i]?.t !== '-') continue
+    let j = i
+    while (ops[j]?.t === '-') j++
+    let k = j
+    while (ops[k]?.t === '+') k++
+    if (k - j === j - i) for (let d = 0; d < j - i; d++) { pair.set(i + d, j + d); pair.set(j + d, i + d) }
+    i = k - 1
+  }
+  return ops.map((o, i) => {
+    if (o === null) return '<span class="d-gap">…\n</span>'
+    const other = ops[pair.get(i) ?? -1]
+    let text = esc(o.s)
+    if (other) {
+      const { head, tail } = changedSpan(o.s, other.s)
+      const end = o.s.length - tail
+      // nothing shared: the line colour already says so
+      if (head + tail > 0 && end > head) text = `${esc(o.s.slice(0, head))}<mark>${esc(o.s.slice(head, end))}</mark>${esc(o.s.slice(end))}`
+    }
+    return `<span${o.t === '+' ? ' class="d-add"' : o.t === '-' ? ' class="d-del"' : ''}>${o.t} <span class="d-t">${text}</span>\n</span>`
+  }).join('')
 }
 
 const fileHead = (p: string, state: string, note?: string) =>

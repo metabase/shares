@@ -166,8 +166,14 @@ ${[0, 1, 2, 3, 4, 5, 6].map((i) => `  .app .av.h${i}{--av:var(--h${i})}`).join('
   .sh .pick .hint:not(:empty){padding:.5rem .9rem}
   .app pre{width:100%;box-sizing:border-box;margin:.4rem 0 0;font-size:.78rem;white-space:pre-wrap;
     overflow-wrap:anywhere}
+  .app .d-add,.app .d-del,.app .d-gap{display:block}
   .app .d-add{background:rgba(46,160,67,.18)}
   .app .d-del{background:rgba(248,81,73,.18)}
+  .app .d-add mark,.app .d-del mark{color:inherit;border-radius:3px}
+  .app .d-add mark{background:rgba(46,160,67,.4)}
+  .app .d-del mark{background:rgba(248,81,73,.4)}
+  ::highlight(d-add){background-color:rgba(46,160,67,.4)}
+  ::highlight(d-del){background-color:rgba(248,81,73,.4)}
   .app .d-gap{color:var(--muted)}
   .app .tag{font-size:.7rem;border:1px solid var(--border);border-radius:5px;padding:0 .35em;color:var(--muted)}
   .app .tag.live,.app .tag.added{color:var(--acc2);border-color:var(--acc2)}
