@@ -233,6 +233,10 @@ describe('web app', () => {
     expect(d).toContain('<span class="d-add">+ <span class="d-t">TWO</span>\n</span>')
     expect(d).toMatch(/gone\.txt<\/b> <span class="tag removed">removed/)
     expect(d).toMatch(/new\.txt<\/b> <span class="tag added">added/)
+    // the language hint is the extension of the file name only
+    await commit(top, { 'a.md': 'x', 'v.2/Makefile': 'a' }, t)
+    await commit(top, { 'a.md': 'x', 'v.2/Makefile': 'b' }, t)
+    expect((await text(`/_s/${top}?diff=3..4`)).body).toContain('<code class="nohighlight" data-lang="">')
   })
 
   it('gives the list rows and the share page header icon buttons with a label, one toast and the link favicon', async () => {

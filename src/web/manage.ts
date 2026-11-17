@@ -236,7 +236,7 @@ async function diffSection(store: QueryStore, slug: string, self: string, a: num
       blocks.push(fileHead(p, state(p), tx === null || ty === null ? 'binary' : 'too large for a line diff'))
       continue
     }
-    blocks.push(`${fileHead(p, state(p))}<pre><code class="nohighlight" data-lang="${esc(p.split('.').pop()!.toLowerCase())}">${diffLines(hunks(ops))}</code></pre>`)
+    blocks.push(`${fileHead(p, state(p))}<pre><code class="nohighlight" data-lang="${/\.([a-z0-9]+)$/i.exec(p)?.[1].toLowerCase() ?? ''}">${diffLines(hunks(ops))}</code></pre>`)
   }
   const more = changed.length > MAX_DIFF_FILES ? `<p class="sub">${changed.length - MAX_DIFF_FILES} more changed files not shown.</p>` : ''
   return `<h2>Diff v${a} → v${b}</h2>

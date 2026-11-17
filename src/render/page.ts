@@ -200,7 +200,7 @@ ${opts.slug ? `<footer><small>clone this share: <code>share download ${esc(opts.
     if (m) need[ALIAS[m[1]] || m[1]] = true
   })
   document.querySelectorAll('code[data-lang]').forEach(function (c) {
-    if (ALIAS[c.dataset.lang]) need[ALIAS[c.dataset.lang]] = true
+    if (Object.hasOwn(ALIAS, c.dataset.lang)) need[ALIAS[c.dataset.lang]] = true
   })
   // ALIAS picks which grammar file loads, but hljs also has to accept the
   // fence's own name (\`\`\`gleam -> language-gleam): unknown class names
@@ -218,7 +218,8 @@ ${opts.slug ? `<footer><small>clone this share: <code>share download ${esc(opts.
     var hi = window.Highlight && window.CSS && CSS.highlights
     document.querySelectorAll('code[data-lang] .d-t').forEach(function (el) {
       var lang = el.closest('code').dataset.lang
-      lang = ALIAS[lang] || lang
+      // own keys only: a file named x.constructor must not reach Object
+      if (Object.hasOwn(ALIAS, lang)) lang = ALIAS[lang]
       var m = el.querySelector('mark')
       if (!hljs.getLanguage(lang) || (m && !hi)) return
       var from = 0, len = 0
