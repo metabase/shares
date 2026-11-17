@@ -236,7 +236,7 @@ async function diffSection(store: QueryStore, slug: string, self: string, a: num
       blocks.push(fileHead(p, state(p), tx === null || ty === null ? 'binary' : 'too large for a line diff'))
       continue
     }
-    blocks.push(`${fileHead(p, state(p))}<pre><code class="nohighlight">${diffLines(hunks(ops))}</code></pre>`)
+    blocks.push(`${fileHead(p, state(p))}<pre><code class="nohighlight" data-lang="${esc(p.split('.').pop()!.toLowerCase())}">${diffLines(hunks(ops))}</code></pre>`)
   }
   const more = changed.length > MAX_DIFF_FILES ? `<p class="sub">${changed.length - MAX_DIFF_FILES} more changed files not shown.</p>` : ''
   return `<h2>Diff v${a} → v${b}</h2>
@@ -245,7 +245,8 @@ ${blocks.join('\n')}${more}`
 }
 
 // One span per line, each with its own newline so the text copies as a
-// diff. A run of removed lines followed by as many added lines is a rewrite:
+// diff. The text of a line is in a d-t span, which the page script colours
+// by the language of the file. A run of removed lines followed by as many added lines is a rewrite:
 // each pair gets a <mark> on the part that differs.
 function diffLines(ops: (Op | null)[]) {
   const pair = new Map<number, number>()
@@ -268,7 +269,7 @@ function diffLines(ops: (Op | null)[]) {
       // nothing shared: the line colour already says so
       if (head + tail > 0 && end > head) text = `${esc(o.s.slice(0, head))}<mark>${esc(o.s.slice(head, end))}</mark>${esc(o.s.slice(end))}`
     }
-    return `<span${o.t === '+' ? ' class="d-add"' : o.t === '-' ? ' class="d-del"' : ''}>${o.t} ${text}\n</span>`
+    return `<span${o.t === '+' ? ' class="d-add"' : o.t === '-' ? ' class="d-del"' : ''}>${o.t} <span class="d-t">${text}</span>\n</span>`
   }).join('')
 }
 

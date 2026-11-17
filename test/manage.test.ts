@@ -228,9 +228,9 @@ describe('web app', () => {
 
     const d = (await text(`/_s/${top}?diff=1..2`)).body
     expect(d).toContain('3 of 3 files differ')
-    expect(d).toContain('<code class="nohighlight">')
-    expect(d).toContain('<span class="d-del">- two\n</span>')
-    expect(d).toContain('<span class="d-add">+ TWO\n</span>')
+    expect(d).toContain('<code class="nohighlight" data-lang="md">')
+    expect(d).toContain('<span class="d-del">- <span class="d-t">two</span>\n</span>')
+    expect(d).toContain('<span class="d-add">+ <span class="d-t">TWO</span>\n</span>')
     expect(d).toMatch(/gone\.txt<\/b> <span class="tag removed">removed/)
     expect(d).toMatch(/new\.txt<\/b> <span class="tag added">added/)
   })
