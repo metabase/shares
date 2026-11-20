@@ -6,3 +6,4 @@ UPLOAD_TOKEN=dev-upload
 DEV_LOGIN=1
 # you, to see the admin view; /_dev/login signs in as this email by default
 # ADMIN_EMAIL=you@metabase.com
+# more admins, comma separated: ADMIN_EMAILS=a@metabase.com,b@metabase.com

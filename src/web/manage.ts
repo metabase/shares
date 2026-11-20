@@ -4,6 +4,7 @@
 // and title forms). D1+R2 store only: the KV store has no versions.
 
 import type { Env } from '../env'
+import { isAdmin } from '../env'
 import { esc, notFound, page } from '../render/page'
 import { ICON, STYLE, copyLink, iconLink, nav, person, privateTag, when } from './shell'
 import { contentBase, hostKind, type HostKind } from '../origins'
@@ -21,7 +22,7 @@ const MAX_DIFF_BYTES = 512_000
 const bytes = (n: number) =>
   n < 1024 ? `${n} B` : n < 1048576 ? `${(n / 1024).toFixed(1)} KB` : `${(n / 1048576).toFixed(1)} MB`
 
-const canManage = (share: ShareInfo, email: string, env: Env) => share.owner === email || email === env.ADMIN_EMAIL
+const canManage = (share: ShareInfo, email: string, env: Env) => share.owner === email || isAdmin(env, email)
 
 const ACCESS: Record<Visibility, string> = {
   private: 'Only you',
@@ -288,7 +289,7 @@ function manageForms(share: ShareInfo, self: string, email: string, env: Env, co
   const form = (action: string, body: string, cls = '') =>
     `<form method="post" action="${self}"${cls ? ` class="${cls}"` : ''}><input type="hidden" name="action" value="${action}">${body}</form>`
   const owner = email === share.owner
-  const lose = !owner || email === env.ADMIN_EMAIL ? ''
+  const lose = !owner || isAdmin(env, email) ? ''
     : share.visibility === 'private' ? ' A private share stays private: you lose access to it.' : ' You lose edit access.'
   return `<h2>Settings</h2>
 <div class="frm">

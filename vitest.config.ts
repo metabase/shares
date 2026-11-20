@@ -9,6 +9,8 @@ export default defineConfig({
         bindings: {
           SESSION_SECRET: 'test-session-secret',
           UPLOAD_TOKEN: 'test-upload-token',
+          // a second admin besides ADMIN_EMAIL (test/admins.test.ts)
+          ADMIN_EMAILS: 'nobody@metabase.com, deputy@metabase.com',
           // wrangler reads .dev.vars too; the tests set DEV_LOGIN themselves
           DEV_LOGIN: '',
           // no GitHub lookup for x-share-cli-latest

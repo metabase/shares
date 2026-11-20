@@ -2,6 +2,7 @@
 // attributes, versions and manifests. Shapes: api-types.ts.
 
 import type { Env } from '../env'
+import { isAdmin } from '../env'
 import { canRead, isQueryStore, StoreError } from '../store'
 import type { ShareAttrs, ShareStore } from '../store'
 
@@ -14,7 +15,7 @@ async function body<T>(req: Request) {
 
 export async function jsonApi(req: Request, url: URL, key: string, env: Env, store: ShareStore, who: string): Promise<Response> {
   if (!isQueryStore(store)) return error(501, 'not supported')
-  const admin = who === env.ADMIN_EMAIL
+  const admin = isAdmin(env, who)
   const get = req.method === 'GET'
   const [, kind, ...rest] = key.split('/')
   try {
