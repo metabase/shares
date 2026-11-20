@@ -10,7 +10,11 @@ export interface Env {
 
   GOOGLE_CLIENT_ID: string
   ALLOWED_DOMAIN: string
+  // the main admin; also the identity of UPLOAD_TOKEN and the owner of
+  // legacy shares without one
   ADMIN_EMAIL: string
+  // more admins, comma separated: the same rights as ADMIN_EMAIL (isAdmin)
+  ADMIN_EMAILS?: string
   // "1": public read-only deploy (env.pub), no Google login
   PUBLIC?: string
   // "1": owners can mark a share public, readable without login.
@@ -34,4 +38,11 @@ export interface Env {
   GOOGLE_CLIENT_SECRET?: string
   SESSION_SECRET: string
   UPLOAD_TOKEN?: string
+}
+
+// ADMIN_EMAIL or one of ADMIN_EMAILS
+export function isAdmin(env: Env, email: string | null | undefined): email is string {
+  if (!email) return false
+  return email === env.ADMIN_EMAIL
+    || (env.ADMIN_EMAILS ?? '').split(',').some((e) => e.trim().toLowerCase() === email)
 }

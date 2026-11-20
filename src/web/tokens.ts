@@ -3,6 +3,7 @@
 // device endpoints need nothing: the device code is the credential.
 
 import type { Env } from '../env'
+import { isAdmin } from '../env'
 import type { DeviceStartResponse, DeviceTokenResponse, TokenInfo } from '../api-types'
 import { esc, page } from '../render/page'
 import { STYLE as APP_STYLE, codeBlock, nav, when } from './shell'
@@ -157,7 +158,7 @@ ${rows.length ? `<div class="scroll"><table class="tl"><tr><th>Name</th><th>Crea
 <form method="post" class="row"><input type="hidden" name="action" value="create">
 <input name="name" placeholder="Token name, e.g. laptop" maxlength="100" size="24" required><button class="pri">Create token</button></form>
 </div>
-${email === env.ADMIN_EMAIL ? await serviceSection(env) : ''}
+${isAdmin(env, email) ? await serviceSection(env) : ''}
 <p class="fin">Then publish anything: <code>share thing.md</code> prints a URL. <code>share -h</code> for the rest</p>
 </div>`, { poll: false })
 }
@@ -205,7 +206,7 @@ export async function formPost(req: Request, url: URL, env: Env, email: string):
       return new Response(null, { status: 303, headers: { location: '/_token' } })
     }
     if (action === 'service-create' || action === 'service-revoke') {
-      if (email !== env.ADMIN_EMAIL) return new Response('forbidden\n', { status: 403 })
+      if (!isAdmin(env, email)) return new Response('forbidden\n', { status: 403 })
       if (action === 'service-revoke') {
         await revokeServiceToken(env, email, String(form.get('id') || ''))
         return new Response(null, { status: 303, headers: { location: '/_token' } })

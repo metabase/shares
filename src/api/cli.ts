@@ -2,6 +2,7 @@
 // api-types.ts.
 
 import type { Env } from '../env'
+import { isAdmin } from '../env'
 import { canRead, isQueryStore, pinned, StoreError } from '../store'
 import type { CommitFile, ShareAttrs, ShareStore } from '../store'
 import type { ImportRequest, PublishResponse, Visibility } from '../api-types'
@@ -72,7 +73,7 @@ export async function cli(req: Request, url: URL, env: Env, store: ShareStore, w
 }
 
 async function dispatch(req: Request, url: URL, env: Env, store: ShareStore, who: string): Promise<Response> {
-  const admin = who === env.ADMIN_EMAIL
+  const admin = isAdmin(env, who)
 
   if (url.pathname === '/_list') {
     // ?prefix=slug/ lists every file in a share (any token -- download works

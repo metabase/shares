@@ -3,6 +3,7 @@
 // lists and revokes service tokens. Types: api-types.ts.
 
 import type { Env } from '../env'
+import { isAdmin } from '../env'
 import type { ServiceTokenCreate, ServiceTokenInfo, WhoAmI } from '../api-types'
 import {
   AGENT_NAME, SCOPE, TOKEN_DAYS, createServiceToken, listServiceTokens, listTokens, revokeServiceToken, revokeToken,
@@ -40,11 +41,11 @@ export async function tokensApi(req: Request, url: URL, env: Env,
   who: { email: string; id: string | null }): Promise<Response | null> {
   const p = url.pathname
   if (p === '/_api/whoami' && req.method === 'GET') {
-    return Response.json({ kind: 'user', email: who.email, admin: who.email === env.ADMIN_EMAIL, token: who.id } satisfies WhoAmI)
+    return Response.json({ kind: 'user', email: who.email, admin: isAdmin(env, who.email), token: who.id } satisfies WhoAmI)
   }
   if (p !== '/_api/tokens' && !p.startsWith('/_api/tokens/')) return null
   if (!env.DB) return error(501, 'not supported')
-  const admin = who.email === env.ADMIN_EMAIL
+  const admin = isAdmin(env, who.email)
   const service = url.searchParams.get('kind') === 'service'
 
   if (p === '/_api/tokens' && req.method === 'GET') {

@@ -94,5 +94,7 @@ CONTENT_HOST = "shares.metabase.fyi"
 APP_HOST = "app.shares.metabase.fyi"
 # admin: /_import, /_stats, /_audit, service tokens
 ADMIN_EMAIL = "tyler@metabase.com"
+# more admins, comma separated, with the same rights
+ADMIN_EMAILS = "bryan@metabase.com"
 # PUBLIC_SHARING is off here; set PUBLIC_SHARING = "1" to allow public shares
 # CLI_MIN_VERSION is unset here; set CLI_MIN_VERSION = "x.y.z" to stop older CLIs

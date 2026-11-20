@@ -1,5 +1,6 @@
 import { zipSync } from 'fflate'
 import type { Env } from '../env'
+import { isAdmin } from '../env'
 import { ago, esc, notFound, page } from '../render/page'
 import { render } from '../render/files'
 import { INDEX_PAGES, canRead, isQueryStore, pinned, type ShareStore, type ShareSummary } from '../store'
@@ -67,8 +68,8 @@ export async function serve(url: URL, email: string | null, env: Env, store: Sha
   if (key === '') {
     // /?mine: admin's bookmarkable "just my shares" view (non-admins
     // already see only their own)
-    const isAdmin = email === env.ADMIN_EMAIL
-    const admin = isAdmin && !url.searchParams.has('mine')
+    const viewerAdmin = isAdmin(env, email)
+    const admin = viewerAdmin && !url.searchParams.has('mine')
     // ?q=: full text search (D1+R2), best match first; ?c=: the shares of
     // a collection that the viewer can read (as the JSON API);
     // ?view=collections: collection rows only
@@ -158,13 +159,13 @@ export async function serve(url: URL, email: string | null, env: Env, store: Sha
     }
     const seg = (label: string, on: boolean, h: string) =>
       `<a href="${h}"${on ? ' class="on" aria-current="true"' : ''}>${label}</a>`
-    const scope = isAdmin && !c
+    const scope = viewerAdmin && !c
       ? `<div class="scope" role="group" aria-label="Scope">${seg('Mine', !admin, href({ mine: true, cols: onlyCols }))}${
         seg('Everyone', admin, href({ mine: false, cols: onlyCols }))}</div>`
       : ''
     const filter = query && !c
-      ? `<div class="scope" role="group" aria-label="Show">${seg('All', !onlyCols, href({ mine: isAdmin && !admin, cols: false }))}${
-        seg('Collections', onlyCols, href({ mine: isAdmin && !admin, cols: true }))}</div>`
+      ? `<div class="scope" role="group" aria-label="Show">${seg('All', !onlyCols, href({ mine: viewerAdmin && !admin, cols: false }))}${
+        seg('Collections', onlyCols, href({ mine: viewerAdmin && !admin, cols: true }))}</div>`
       : ''
     // new share by upload; in a collection view it lands in that collection
     const up = query?.commit ? `<span class="hdup">${uploadUi({ token: await uploadToken(env, email!), mode: 'new', collection: c || undefined })}</span>` : ''
@@ -211,7 +212,7 @@ export async function serve(url: URL, email: string | null, env: Env, store: Sha
 </style>
 ${STYLE}<div class="app">${nav(email!, env, 'shares')}
 <div class="hd"><h1>${title}</h1>${filter}${scope}${up}</div>${colHead}
-<form method="get" action="/">${admin ? '' : isAdmin ? '<input type="hidden" name="mine" value="">' : ''}${
+<form method="get" action="/">${admin ? '' : viewerAdmin ? '<input type="hidden" name="mine" value="">' : ''}${
   onlyCols ? '<input type="hidden" name="view" value="collections">' : ''}
 <input id="q" name="q" value="${esc(q)}" placeholder="Search shares" aria-label="Search shares" autofocus></form>
 ${rows.length ? `<div class="scroll"><table class="lst">${head}<tbody id="shares">${rows.join('')}</tbody></table></div>` : `<p class="sub">${empty}</p>`}
@@ -293,7 +294,7 @@ pvPump()
   // /_stats (admin): shares + files per owner from the cached _man/ list,
   // pushes from the _pushes counter (counted since it was added)
   if (key === '_stats') {
-    if (email !== env.ADMIN_EMAIL) return new Response('forbidden', { status: 403 })
+    if (!isAdmin(env, email)) return new Response('forbidden', { status: 403 })
     const pushes = await store.pushes()
     const by = new Map<string, { shares: number; files: number; pushes: number }>()
     const row = (o: string) => by.get(o) || by.set(o, { shares: 0, files: 0, pushes: pushes[o] || 0 }).get(o)!

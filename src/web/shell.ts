@@ -3,6 +3,7 @@
 // content pages do not use it and keep the 42rem prose column of page().
 
 import type { Env } from '../env'
+import { isAdmin } from '../env'
 import { ago, esc } from '../render/page'
 
 // Owner hues per theme: 7 hues, each 4.5:1 or more on the theme background
@@ -270,7 +271,7 @@ export type NavPage = 'shares' | 'install' | 'activity' | null
 export function nav(email: string, env: Env, current: NavPage) {
   const items: [NavPage, string, string][] = [
     ['shares', '/', 'Shares'], ['install', '/_token', 'Install']]
-  if (email === env.ADMIN_EMAIL) items.push(['activity', '/_stats', 'Activity'])
+  if (isAdmin(env, email)) items.push(['activity', '/_stats', 'Activity'])
   const links = items.map(([k, href, label]) =>
     `<a href="${href}"${k === current ? ' class="on" aria-current="page"' : ''}>${label}</a>`).join('')
   const themes = ['auto', 'light', 'dark', 'tokyo', 'nord']
