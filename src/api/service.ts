@@ -1,8 +1,8 @@
 // Bearer endpoints for service tokens: agents and CI. Deny by
 // default: a service token reaches only the routes below, and only for
 // collections that its scopes match. A share is in scope when its
-// collection is; a share without a collection never is. Shapes:
-// api-types.ts.
+// collection is; a share without a collection never is, except for reads
+// with "read:org" (ORG_SCOPE). Shapes: api-types.ts.
 
 import type { Env } from '../env'
 import type { WhoAmI } from '../api-types'
@@ -14,10 +14,16 @@ import { badSlug, publishResponse } from './cli'
 
 type Access = 'read' | 'write'
 
+// Read of every share that is not private, with or without a collection:
+// for company tools that index what people share. It is not a collection
+// scope, so no token reads or writes a collection "org" with it.
+export const ORG_SCOPE = 'read:org'
+
 // "write:metareview/*" matches write and read of metareview/run-1
 export function allows(scopes: string[], access: Access, collection: string | null | undefined) {
   if (!collection) return false
   return scopes.some((s) => {
+    if (s === ORG_SCOPE) return false
     const i = s.indexOf(':')
     const kind = s.slice(0, i)
     if (kind !== 'write' && kind !== access) return false
@@ -61,9 +67,13 @@ async function dispatch(req: Request, url: URL, env: Env, store: ShareStore & Qu
     const s = await store.share(slug)
     return s && canRead(s, viewer) ? s : null
   }
+  const readsOrg = who.scopes.includes(ORG_SCOPE)
   // a share is in scope when the token can read it and its collection
-  // matches; a version read path is in scope when its share is
-  const shareIn = async (access: Access, top: string) => can(access, (await readable(baseSlug(top)))?.collection)
+  // matches, or, for a read with read:org, when it is not private
+  const inScope = (access: Access, s: ShareInfo | null) =>
+    !!s && (can(access, s.collection) || (access === 'read' && readsOrg && s.visibility !== 'private'))
+  // a version read path is in scope when its share is
+  const shareIn = async (access: Access, top: string) => inScope(access, await readable(baseSlug(top)))
   const key = decodeURIComponent(url.pathname.slice(1))
   const get = req.method === 'GET'
 
@@ -132,22 +142,25 @@ async function dispatch(req: Request, url: URL, env: Env, store: ShareStore & Qu
   if (key === '_api/shares' && get) {
     const q = url.searchParams
     const collection = q.get('collection')
-    if (!can('read', collection)) return outOfScope()
+    const inCollection = can('read', collection)
+    if (!inCollection && !readsOrg) return outOfScope()
     const limit = Number(q.get('limit') ?? 100)
     const before = q.has('before') ? Number(q.get('before')) : undefined
     if (!Number.isInteger(limit) || limit < 1 || limit > 1000) return error(400, 'bad limit: 1 to 1000')
     if (before !== undefined && !Number.isFinite(before)) return error(400, 'bad before')
     const meta: Record<string, string> = {}
     for (const [k, v] of q) if (k.startsWith('meta.')) meta[k.slice('meta.'.length)] = v
+    // with read:org only, no private share, also not the token's own
     return Response.json(await store.queryShares({
-      collection: collection!, owner: q.get('owner') ?? undefined, meta, viewer, limit, before,
+      collection: collection ?? undefined, owner: q.get('owner') ?? undefined, meta,
+      viewer: inCollection ? viewer : null, limit, before,
     }))
   }
   if (key.startsWith('_api/shares/')) {
     const [slug, sub, ...extra] = key.slice('_api/shares/'.length).split('/')
     if (extra.length || !slug || slug.startsWith('_')) return error(404, 'not found')
     const share = await readable(slug)
-    if (!share || !can('read', share.collection)) return outOfScope()
+    if (!share || !inScope('read', share)) return outOfScope()
     if (sub === undefined && req.method === 'POST') {
       const attrs = await body<ShareAttrs>(req)
       if (!can('write', share.collection)

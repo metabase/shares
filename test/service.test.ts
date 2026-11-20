@@ -36,6 +36,11 @@ describe('scope matching', () => {
     expect(allows(['write:ci'], 'write', 'ci')).toBe(true)
     expect(allows(['write:*'], 'write', null)).toBe(false)
   })
+
+  it('does not treat read:org as the scope of a collection named org', () => {
+    expect(allows(['read:org'], 'read', 'org')).toBe(false)
+    expect(allows(['read:org'], 'read', null)).toBe(false)
+  })
 })
 
 describe('service tokens', () => {
@@ -106,6 +111,39 @@ describe('service tokens', () => {
     expect((await commit(slug('r'), { 'a.txt': 'a' }, { collection: 'shared' }, token)).status).toBe(403)
   })
 
+  it('reads and lists every share that is not private with read:org, and writes none', async () => {
+    const { token } = await serviceToken({ name: 'comos', scopes: ['read:org'], on_behalf_of: 'pat@metabase.com' })
+    const ann = await userToken('ann@metabase.com')
+    const pat = await userToken('pat@metabase.com')
+    const org = slug('org')
+    const inCol = slug('in-col')
+    const priv = slug('priv')
+    expect((await publish(org, { 'a.txt': 'org' }, ann)).status).toBe(200)
+    expect((await commit(inCol, { 'a.txt': 'c' }, { collection: `team/${slug('c')}` }, ann)).status).toBe(200)
+    expect((await commit(priv, { 'a.txt': 'secret' }, { visibility: 'private' }, pat)).status).toBe(200)
+
+    for (const top of [org, inCol]) {
+      expect((await api('GET', `/_api/shares/${top}`, { token })).status, top).toBe(200)
+      expect((await api('GET', `/_api/shares/${top}/manifest`, { token })).status, top).toBe(200)
+      expect(await (await api('GET', `/_list?prefix=${top}/`, { token })).text()).toBe(`${top}/a.txt\n`)
+    }
+    expect(await (await api('GET', `/${org}/a.txt`, { token })).text()).toBe('org')
+    const listed = (await (await api('GET', '/_api/shares?limit=1000', { token })).json<ShareInfo[]>()).map((s) => s.slug)
+    expect(listed).toEqual(expect.arrayContaining([org, inCol]))
+
+    // a private share, also one of the person the token acts for
+    expect(listed).not.toContain(priv)
+    expect((await api('GET', `/_api/shares/${priv}`, { token })).status).toBe(403)
+    expect((await api('GET', `/${priv}/a.txt`, { token })).status).toBe(403)
+    expect((await api('GET', `/_list?prefix=${priv}/`, { token })).status).toBe(403)
+
+    // no write
+    expect((await commit(org, { 'a.txt': 'x' }, {}, token)).status).toBe(403)
+    expect((await commit(slug('new'), { 'a.txt': 'x' }, {}, token)).status).toBe(403)
+    expect((await post(`/_api/shares/${org}`, { title: 'x' }, token)).status).toBe(403)
+    expect((await api('DELETE', `/${org}/`, { token })).status).toBe(403)
+  })
+
   it('is made, listed and revoked only by the admin, with audit rows', async () => {
     const bob = await userToken('bob@metabase.com')
     expect((await post('/_api/tokens', { name: 'x', scopes: ['write:x'] }, bob)).status).toBe(403)
@@ -116,6 +154,7 @@ describe('service tokens', () => {
       { name: 'ok', scopes: ['admin:x'] },
       { name: 'ok', scopes: ['write:x'], on_behalf_of: 'eve@example.com' },
       { name: 'ok', scopes: ['write:x'], expires_days: 9999 },
+      { name: 'ok', scopes: ['write:org'] },
     ]) expect((await post('/_api/tokens', bad)).status, JSON.stringify(bad)).toBe(400)
 
     const { id, token } = await serviceToken({ name: 'rev', scopes: ['write:rev/*'], expires_days: 30 })

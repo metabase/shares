@@ -69,7 +69,8 @@ A new share is --org and listed unless you say otherwise. A republish (-e)
 without these flags keeps the share's visibility and listing.
 token options:
       --scope <scope>       read:<collection> or write:<collection>, a trailing *
-                            matches any rest (write:metareview/*); repeatable
+                            matches any rest (write:metareview/*), or read:org
+                            (read every share that is not private); repeatable
       --on-behalf-of <email>  the person who owns the shares the token makes
       --days <n>            expiry, 1 to 365 (default 365)
 global options:
