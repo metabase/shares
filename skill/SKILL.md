@@ -120,8 +120,10 @@ share token revoke <id> --service
 ```
 
 The token is shown once. Scopes are `read:<collection>` and
-`write:<collection>`; a trailing `*` matches any rest. A service token can
-publish only into its collections, owner `agent:<name>`.
+`write:<collection>`; a trailing `*` matches any rest. `read:org` reads every
+share that is not private, with or without a collection, and lists them with
+`share api shares` without a collection. A service token can publish only
+into its collections, owner `agent:<name>`.
 
 ## Public shares
 

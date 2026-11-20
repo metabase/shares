@@ -141,7 +141,9 @@ export interface WhoAmI {
 // routes give 403. Scopes:
 // "read:<collection>" or "write:<collection>" (write implies read); a
 // trailing "*" matches any rest, "write:metareview/*". A share is in scope
-// when its collection is.
+// when its collection is. "read:org" reads every share that is not private,
+// with or without a collection, and lists them with GET /_api/shares
+// without a collection.
 export interface ServiceTokenCreate {
   name: string
   scopes: string[]
@@ -254,6 +256,7 @@ export interface CollectionUpdate {
 
 // query string of GET /_api/shares
 export interface ShareQuery {
+  // a service token without read:org must give a collection in its scope
   collection?: string
   owner?: string
   // meta.<key>=<value>, repeatable, all must match. The value matches the

@@ -19,8 +19,9 @@ const serviceInfo = (t: ServiceTokenRow): ServiceTokenInfo => ({
 export function serviceSpec(b: Partial<ServiceTokenCreate>, env: Env): ServiceTokenCreate | string {
   if (typeof b.name !== 'string' || !AGENT_NAME.test(b.name)) return 'bad name: [a-z0-9._-], at most 64'
   if (!Array.isArray(b.scopes) || !b.scopes.length || !b.scopes.every((s) => typeof s === 'string' && SCOPE.test(s))) {
-    return 'bad scopes: a list of read:<collection> or write:<collection>, a trailing * matches any rest'
+    return 'bad scopes: a list of read:<collection> or write:<collection>, a trailing * matches any rest, or read:org'
   }
+  if (b.scopes.includes('write:org')) return 'bad scopes: org is not a collection; read:org reads all shares that are not private'
   const obo = b.on_behalf_of
   if (obo !== undefined && obo !== null
     && (typeof obo !== 'string' || obo !== obo.toLowerCase() || !obo.endsWith(`@${env.ALLOWED_DOMAIN}`))) {
