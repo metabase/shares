@@ -392,5 +392,5 @@ const MERMAID = 'https://cdn.jsdelivr.net/npm/mermaid@11.15.0/dist/mermaid.min.j
 // newest first; a diagram that fails to load or parse on one falls back to
 // the next. Exact pins only: a floating range would run any future npm
 // release on every viewer's page unreviewed. Bump deliberately.
-const RELADRAWS = ['0.31.2', '0.19.1', '0.18.0']
+const RELADRAWS = ['0.32.1', '0.31.2', '0.19.1']
   .map((v) => `https://cdn.jsdelivr.net/npm/reladraw@${v}/+esm`)
